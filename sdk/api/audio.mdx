@@ -1,0 +1,549 @@
+---
+title: "Audio Client API: playback, recording, and TTS"
+description: "Play PCM audio, control recording, disable ai-core physical button actions, and arbitrate camera and audio resources between your app and ai-core."
+---
+
+The Audio Client API gives your application control over everything audio-related on the AI Smart Glasses: PCM file playback, TTS text-to-speech, recording start and stop, and a resource arbitration system that lets you temporarily take exclusive ownership of the camera or microphone away from `ai-core`. Each API call opens a short-lived Unix socket connection to the `ai-core` audio service, sends a command, and returns the result — there is no persistent connection to manage.
+
+## Types
+
+### `ai_audio_params_t`
+
+Full parameter set for PCM playback. Pass `-1` for any optional field to use the server default.
+
+```c
+typedef struct {
+    const char *file_path;  /* PCM file path (required) */
+    int volume;             /* 0–100; -1 = server default */
+    int force;              /* 0 = queue, 1 = interrupt current playback */
+    int sample_rate;        /* 8000–96000 Hz; -1 = server default */
+    int channels;           /* 1–8; -1 = server default */
+    int bit_width;          /* 8, 16, 24, or 32; -1 = server default */
+} ai_audio_params_t;
+```
+
+### `ai_audio_tts_params_t`
+
+Parameter set for TTS playback.
+
+```c
+typedef struct {
+    const char *text;   /* UTF-8 text to synthesize (required) */
+    int volume;         /* 0–100; -1 = server default */
+    int force;          /* 0 = queue, 1 = interrupt current playback */
+    int use_cache;      /* 1 = reuse cached audio for identical text (recommended) */
+} ai_audio_tts_params_t;
+```
+
+### `ai_audio_resource_status_t`
+
+Reports which resources `ai-core` currently holds.
+
+```c
+typedef struct {
+    int camera_suspended; /* 1 = released to your app, 0 = held by ai-core */
+    int audio_suspended;  /* 1 = released to your app, 0 = held by ai-core */
+} ai_audio_resource_status_t;
+```
+
+### Resource mask constants
+
+```c
+#define AI_AUDIO_RESOURCE_CAMERA  0x01
+#define AI_AUDIO_RESOURCE_AUDIO   0x02
+#define AI_AUDIO_RESOURCE_ALL     (AI_AUDIO_RESOURCE_CAMERA | AI_AUDIO_RESOURCE_AUDIO)
+```
+
+### Error codes
+
+```c
+#define AI_AUDIO_SUCCESS           0   /* Success */
+#define AI_AUDIO_ERROR_INIT       -1   /* Initialization failed */
+#define AI_AUDIO_ERROR_CONNECT    -2   /* Could not connect to service */
+#define AI_AUDIO_ERROR_SEND       -3   /* Failed to send command */
+#define AI_AUDIO_ERROR_PARAM      -4   /* Invalid parameter */
+#define AI_AUDIO_ERROR_RESPONSE   -5   /* Server returned an error */
+#define AI_AUDIO_ERROR_STATE      -6   /* Invalid state (e.g., duplicate record start) */
+```
+
+### `ai_audio_t`
+
+Opaque client handle created by `ai_audio_init()`.
+
+## Functions
+
+### `ai_audio_init()`
+
+Allocates and returns an audio client handle. No socket connection is established at this point — connections are created per-command.
+
+**Signature:**
+
+```c
+ai_audio_t* ai_audio_init(const char *socket_path);
+```
+
+<ParamField path="socket_path" type="const char *">
+  Path to the `ai-core` audio Unix socket. Pass `NULL` to use the SDK default path.
+</ParamField>
+
+**Returns:** A client handle on success, `NULL` if memory allocation fails.
+
+---
+
+### `ai_audio_play()`
+
+Plays a PCM audio file with full parameter control.
+
+**Signature:**
+
+```c
+int ai_audio_play(ai_audio_t *client, const ai_audio_params_t *params);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="params" type="const ai_audio_params_t *">
+  Playback parameters. Set `force = 1` to interrupt any audio currently playing; `force = 0` adds to the end of the queue.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_play_simple()`
+
+Simplified helper that plays a PCM file with all parameters set to server defaults.
+
+**Signature:**
+
+```c
+int ai_audio_play_simple(ai_audio_t *client, const char *file_path);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="file_path" type="const char *">
+  Path to the PCM file on the device filesystem.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_stop()`
+
+Immediately stops the currently playing audio and clears the playback queue.
+
+**Signature:**
+
+```c
+int ai_audio_stop(ai_audio_t *client);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_set_disable_aicore_physical_actions()`
+
+Controls whether `ai-core` reacts to physical button presses for its built-in actions (starting recording, triggering barge-in, etc.). When disabled, GPIO events are still broadcast to all subscribers — only `ai-core`'s own response to those events is suppressed.
+
+**Signature:**
+
+```c
+int ai_audio_set_disable_aicore_physical_actions(ai_audio_t *client, int disabled);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="disabled" type="int">
+  `1` to disable `ai-core` physical button reactions; `0` to restore default behavior.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+<Tip>
+  Call this with `disabled = 1` before your application takes control of the button to avoid race conditions where `ai-core` and your app both react to the same press event.
+</Tip>
+
+---
+
+### `ai_audio_get_disable_aicore_physical_actions()`
+
+Queries the current state of the physical actions disable flag.
+
+**Signature:**
+
+```c
+int ai_audio_get_disable_aicore_physical_actions(ai_audio_t *client, int *disabled);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="disabled" type="int *">
+  Output: set to `1` if physical actions are currently disabled, `0` otherwise.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_record_start()`
+
+Starts recording via the SDK without requiring a physical button press.
+
+**Signature:**
+
+```c
+int ai_audio_record_start(ai_audio_t *client);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or `AI_AUDIO_ERROR_STATE` if recording is already in progress.
+
+---
+
+### `ai_audio_record_stop()`
+
+Stops recording and optionally returns the path of the saved audio file.
+
+**Signature:**
+
+```c
+int ai_audio_record_stop(ai_audio_t *client, char *output_path, int output_path_size);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="output_path" type="char *">
+  Buffer to receive the recorded file path. Pass `NULL` if you do not need the path.
+</ParamField>
+
+<ParamField path="output_path_size" type="int">
+  Size of `output_path` in bytes. Ignored if `output_path` is `NULL`.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_record_get_status()`
+
+Queries whether recording is currently in progress.
+
+**Signature:**
+
+```c
+int ai_audio_record_get_status(ai_audio_t *client, int *recording);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="recording" type="int *">
+  Output: `1` if recording, `0` if idle.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_suspend_resources()`
+
+Asks `ai-core` to release the specified hardware resources so your application can take ownership. Combine `AI_AUDIO_RESOURCE_CAMERA` and `AI_AUDIO_RESOURCE_AUDIO` with a bitwise OR, or use `AI_AUDIO_RESOURCE_ALL`.
+
+**Signature:**
+
+```c
+int ai_audio_suspend_resources(ai_audio_t *client, int resource_mask);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="resource_mask" type="int">
+  Bitmask of resources to suspend. See resource mask constants above.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_resume_resources()`
+
+Returns previously suspended resources back to `ai-core`.
+
+**Signature:**
+
+```c
+int ai_audio_resume_resources(ai_audio_t *client, int resource_mask);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="resource_mask" type="int">
+  Bitmask of resources to resume. Must match what was passed to `ai_audio_suspend_resources()`.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_get_resource_status()`
+
+Queries the current ownership state of camera and audio resources.
+
+**Signature:**
+
+```c
+int ai_audio_get_resource_status(ai_audio_t *client, ai_audio_resource_status_t *status);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="status" type="ai_audio_resource_status_t *">
+  Output struct describing which resources are currently suspended.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+---
+
+### `ai_audio_cleanup()`
+
+Frees the client handle. Does not affect any audio currently playing on the service side.
+
+**Signature:**
+
+```c
+void ai_audio_cleanup(ai_audio_t *client);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle to free. Do not use after this call.
+</ParamField>
+
+---
+
+### `ai_audio_get_error_string()`
+
+Converts an error code to a human-readable string.
+
+**Signature:**
+
+```c
+const char* ai_audio_get_error_string(int error_code);
+```
+
+<ParamField path="error_code" type="int">
+  One of the `AI_AUDIO_ERROR_*` constants.
+</ParamField>
+
+**Returns:** A static, null-terminated string. Do not free or modify it.
+
+### `ai_audio_create_default_params()`
+
+Creates an `ai_audio_params_t` struct pre-populated with defaults for the given file path. All integer fields are set to `-1` (server defaults).
+
+**Signature:**
+
+```c
+ai_audio_params_t ai_audio_create_default_params(const char *file_path);
+```
+
+<ParamField path="file_path" type="const char *">
+  Path to the PCM file on the device filesystem.
+</ParamField>
+
+**Returns:** An `ai_audio_params_t` struct with `file_path` set and all other fields at server defaults. Pass this to `ai_audio_play()` and customize specific fields as needed.
+
+---
+
+## TTS (text-to-speech) functions
+
+The audio client includes built-in TTS support. The service converts text to speech using a cloud TTS API, caches the generated audio, and plays it back via the speaker. No additional service needs to be started — TTS runs through the same `ai-core` audio pipeline.
+
+### `ai_audio_play_tts()`
+
+Plays a text string as synthesized speech with full parameter control.
+
+**Signature:**
+
+```c
+int ai_audio_play_tts(ai_audio_t *client, const ai_audio_tts_params_t *params);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="params" type="const ai_audio_tts_params_t *">
+  TTS parameters including the text, volume, force flag, and cache preference.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code.
+
+<Note>
+  TTS requires a network connection for the first synthesis of a given text. Enable `use_cache = 1` to avoid repeated cloud calls for the same text (the result is cached by MD5 hash on the device).
+</Note>
+
+---
+
+### `ai_audio_play_tts_simple()`
+
+Simplified helper that synthesizes and plays a text string using all default parameters.
+
+**Signature:**
+
+```c
+int ai_audio_play_tts_simple(ai_audio_t *client, const char *text);
+```
+
+<ParamField path="client" type="ai_audio_t *">
+  Handle from `ai_audio_init()`.
+</ParamField>
+
+<ParamField path="text" type="const char *">
+  UTF-8 text to synthesize and play.
+</ParamField>
+
+**Returns:** `AI_AUDIO_SUCCESS` (0) or a negative error code. Default behavior: uses server volume, queues behind current playback, and caches the result.
+
+---
+
+### `ai_audio_create_default_tts_params()`
+
+Creates an `ai_audio_tts_params_t` struct with default values for the given text.
+
+**Signature:**
+
+```c
+ai_audio_tts_params_t ai_audio_create_default_tts_params(const char *text);
+```
+
+<ParamField path="text" type="const char *">
+  The text to synthesize.
+</ParamField>
+
+**Returns:** An `ai_audio_tts_params_t` with `text` set, `volume = -1` (server default), `force = 0` (queue), and `use_cache = 1`.
+
+---
+
+## Resource arbitration
+
+`ai-core` holds exclusive access to the camera and microphone by default. If your application needs those resources — for example, to run its own camera preview or record audio directly — use the suspend/resume pair to hand control back and forth:
+
+```c
+/* Before your app takes over the hardware */
+ai_audio_suspend_resources(client, AI_AUDIO_RESOURCE_ALL);
+
+/* ... use camera and audio in your app ... */
+
+/* Return resources to ai-core when done */
+ai_audio_resume_resources(client, AI_AUDIO_RESOURCE_ALL);
+```
+
+Poll `ai_audio_get_resource_status()` to confirm the transition has completed before opening the hardware in your own code.
+
+## Playback example
+
+```c
+#include "ai_audio.h"
+#include <stdio.h>
+
+int main(void) {
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) {
+        fprintf(stderr, "Failed to initialize audio client\n");
+        return 1;
+    }
+
+    /* Simple play with defaults */
+    int result = ai_audio_play_simple(client, "/oem/usr/bin/resources/beep.pcm");
+    if (result != AI_AUDIO_SUCCESS) {
+        fprintf(stderr, "Play failed: %s\n", ai_audio_get_error_string(result));
+    }
+
+    /* Play with custom parameters at max volume, force-interrupting anything playing */
+    ai_audio_params_t params = {
+        .file_path   = "/data/alert.pcm",
+        .volume      = 100,
+        .force       = 1,
+        .sample_rate = 16000,
+        .channels    = 1,
+        .bit_width   = 16,
+    };
+    ai_audio_play(client, &params);
+
+    ai_audio_cleanup(client);
+    return 0;
+}
+```
+
+## Recording example
+
+```c
+#include "ai_audio.h"
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void) {
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) return 1;
+
+    /* Disable ai-core button handling so it doesn't interfere */
+    ai_audio_set_disable_aicore_physical_actions(client, 1);
+
+    printf("Starting recording...\n");
+    if (ai_audio_record_start(client) != AI_AUDIO_SUCCESS) {
+        fprintf(stderr, "record_start failed\n");
+        ai_audio_cleanup(client);
+        return 1;
+    }
+
+    sleep(5); /* Record for 5 seconds */
+
+    char file_path[256] = {0};
+    ai_audio_record_stop(client, file_path, sizeof(file_path));
+    printf("Recording saved to: %s\n", file_path);
+
+    /* Restore ai-core button handling */
+    ai_audio_set_disable_aicore_physical_actions(client, 0);
+
+    ai_audio_cleanup(client);
+    return 0;
+}
+```
+
+## Compile command
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_audio_app my_audio_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk
+```

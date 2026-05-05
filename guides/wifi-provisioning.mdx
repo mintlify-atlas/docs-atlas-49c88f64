@@ -1,0 +1,81 @@
+---
+title: "Configure WiFi provisioning on AI Smart Glasses"
+description: "Connect AI Smart Glasses to a 2.4GHz WiFi network by scanning a QR code shared from an Android phone, including manual provisioning mode trigger steps."
+---
+
+AI Smart Glasses connect to WiFi by scanning a QR code displayed on an Android phone. The device enters provisioning mode automatically on first boot, and you can re-trigger it at any time by pressing the button 10 times. This guide covers both entry paths and walks you through the full provisioning process.
+
+<Warning>
+  **2.4GHz only.** The device supports 802.11b/g/n (2.4GHz) WiFi only. 5GHz and 5G networks are **not supported**. If your QR code is from a 5GHz network, provisioning will fail — you must switch to a 2.4GHz network on your phone first.
+</Warning>
+
+## Provisioning steps
+
+<Steps>
+  <Step title="Put the device into provisioning mode">
+    The device enters provisioning mode automatically in two situations:
+
+    - **First boot** — after a fresh flash or factory state, the device enters provisioning mode on startup because no WiFi credentials are stored.
+    - **Manual trigger** — at any other time, short-press the button **10 times in quick succession** to force the device into provisioning mode.
+
+    When provisioning mode is active, the device is ready to scan a WiFi QR code.
+  </Step>
+
+  <Step title="Connect your Android phone to the target 2.4GHz network">
+    On your Android phone, open **Settings → WiFi** and connect to the 2.4GHz network you want the glasses to use. Confirm it is a 2.4GHz network — many routers broadcast both 2.4GHz and 5GHz under similar names (e.g., `MyNetwork` and `MyNetwork_5G`). Select the 2.4GHz one.
+  </Step>
+
+  <Step title="Generate a WiFi QR code on your phone">
+    While connected to the target network, tap **Share** (or the QR code icon) next to the network name in your WiFi settings. Android will display a QR code containing the network credentials.
+  </Step>
+
+  <Step title="Scan the QR code with the glasses">
+    Hold the phone's QR code in front of the glasses camera. Keep the display steady and at a comfortable distance. The glasses will scan the code and attempt to connect.
+  </Step>
+
+  <Step title="Wait for the connection confirmation">
+    The device will play an audio prompt when provisioning succeeds. Wait a few seconds after the scan before moving the phone away.
+  </Step>
+</Steps>
+
+## Verify the connection
+
+After provisioning succeeds, confirm connectivity via ADB:
+
+```bash
+adb shell
+```
+
+If ADB connects, the device is online. You can also check the network interface:
+
+```bash
+adb shell ifconfig wlan0
+```
+
+A valid IP address in the `inet addr` field confirms the device is connected to your network.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Device does not enter provisioning mode after 10 presses">
+    Press the button 10 times with consistent, short taps — avoid holding the button down between presses. If provisioning mode still does not activate, power-cycle the device and try again.
+  </Accordion>
+
+  <Accordion title="Glasses cannot scan the QR code">
+    - Make sure the phone screen brightness is set to maximum.
+    - Keep the QR code centered in front of the camera and hold the phone steady.
+    - Try adjusting the distance between the phone and the glasses.
+    - Ensure there is adequate ambient lighting.
+  </Accordion>
+
+  <Accordion title="Provisioning fails after scanning">
+    - Confirm your phone is connected to a **2.4GHz** network, not 5GHz.
+    - Re-generate the QR code — some Android versions expire shared QR codes quickly.
+    - Check that the router has 2.4GHz enabled and is within range.
+    - Restart provisioning mode on the device (10 short presses) and try again.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  A dedicated mobile app for WiFi provisioning is coming soon and will provide a simpler setup flow without needing to use the Android WiFi share feature.
+</Note>

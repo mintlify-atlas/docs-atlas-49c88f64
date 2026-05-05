@@ -1,0 +1,161 @@
+---
+title: "Contribute to AI Smart Glasses open-source project"
+description: "Learn how to report issues, submit code, follow commit conventions, and meet code standards when contributing to the AI Smart Glasses platform."
+icon: "code-pull-request"
+---
+
+AI Smart Glasses is an open-source project and contributions of all kinds are welcome — bug fixes, new features, documentation improvements, testing, and internationalization. This page explains how to get started, what standards to follow, and how to work through the pull request process.
+
+## Reporting issues
+
+Before opening a new issue, search the [existing issues](https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses/issues) to avoid duplicates. When you do file one, include:
+
+- A clear, descriptive title that summarizes the problem
+- Step-by-step reproduction instructions
+- Relevant logs, screenshots, or short video recordings
+- Your firmware version and hardware variant
+
+## Contributing code
+
+<Warning>
+  You must clone this repository under the `AIGLASS_DEV_ENV` workspace root. The build system relies on relative paths between sibling directories. Cloning elsewhere will break compilation of anything in `src/` or `samples/`.
+
+  ```
+  /path/to/AIGLASS_DEV_ENV/
+  ├── OpenSource-Ai-Glasses/    ← clone here
+  ├── luckfox-pico/
+  └── ...
+  ```
+</Warning>
+
+<Steps>
+  <Step title="Fork the repository">
+    Click **Fork** on the [GitHub repository](https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses) to create a copy under your own account.
+  </Step>
+  <Step title="Clone locally under the AIGLASS_DEV_ENV workspace root">
+    Navigate to your local `AIGLASS_DEV_ENV` directory, then clone your fork and initialize submodules:
+
+    ```bash
+    cd /path/to/AIGLASS_DEV_ENV
+    git clone https://github.com/YOUR_USERNAME/OpenSource-Ai-Glasses.git
+    cd OpenSource-Ai-Glasses
+    git submodule update --init --recursive
+    ```
+  </Step>
+  <Step title="Create a feature branch">
+    ```bash
+    git checkout -b feature/your-feature-name
+    ```
+
+    Use a short, descriptive branch name that reflects what you're working on.
+  </Step>
+  <Step title="Make your changes">
+    Follow the code standards described below. For C/C++ code, use K&R style, choose meaningful names, comment complex logic, and use macros instead of magic numbers.
+  </Step>
+  <Step title="Commit using Conventional Commits">
+    Write commit messages in the [Conventional Commits](https://www.conventionalcommits.org/) format described in the section below.
+  </Step>
+  <Step title="Push your branch">
+    ```bash
+    git push origin feature/your-feature-name
+    ```
+  </Step>
+  <Step title="Open a pull request">
+    Go to the original repository on GitHub and open a pull request from your branch. In the PR description, explain the purpose of the change, the problem it solves, and how you tested it.
+  </Step>
+</Steps>
+
+## Commit message format
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/). Every commit message should use this structure:
+
+```text
+<type>: <short description>
+
+[optional body]
+
+[optional footer]
+```
+
+Supported types:
+
+| Type       | When to use                        |
+| ---------- | ---------------------------------- |
+| `feat`     | New feature                        |
+| `fix`      | Bug fix                            |
+| `docs`     | Documentation update               |
+| `refactor` | Code restructuring without behavior change |
+| `test`     | Test additions or corrections      |
+| `chore`    | Build system or toolchain changes  |
+
+Example from the project:
+
+```text
+feat: add WiFi auto-connect feature
+
+- Implement WiFi configuration save
+- Add auto-connect on boot
+- Support multiple WiFi hotspots
+
+Closes #123
+```
+
+## Code standards
+
+For C/C++ code:
+
+- Follow **K&R style** (Kernighan & Ritchie) for braces, indentation, and spacing
+- Use meaningful variable and function names — avoid single-letter names outside loop indices
+- Add comments to explain complex or non-obvious logic
+- Define constants with macros; do not use magic numbers inline
+
+## Pull request checklist
+
+Before submitting your PR, verify:
+
+- Your code follows the K&R style and project naming conventions
+- Documentation is updated if you added or changed a feature
+- Existing functionality is not broken
+- The PR title clearly describes what the change does
+
+## What not to commit
+
+<Warning>
+  Do not commit any of the following:
+
+  - Build artifacts: `.o`, `.so`, `.img`, and other compiled output
+  - IDE or personal configuration files not shared across the project
+  - Large binary files
+  - Hardcoded passwords, API keys, or secrets of any kind
+</Warning>
+
+Contributions must also be compatible with the **Apache 2.0 license**. Do not copy code with incompatible copyright restrictions.
+
+## Contribution areas
+
+<CardGroup cols={2}>
+  <Card title="Bug fixes" icon="bug">
+    Fix known issues or improve stability in firmware, services, or the SDK.
+  </Card>
+  <Card title="New features" icon="sparkles">
+    Add hardware driver support, implement new application scenarios, or improve performance.
+  </Card>
+  <Card title="Documentation" icon="book-open">
+    Improve API docs, add tutorials and worked examples, or clarify existing guides.
+  </Card>
+  <Card title="Testing" icon="flask-conical">
+    Add test coverage, write integration tests, or improve CI reliability.
+  </Card>
+  <Card title="Internationalization" icon="globe">
+    Translate documentation into other languages or add multi-language support to the firmware.
+  </Card>
+  <Card title="SDK development" icon="code">
+    Extend the C SDK with new modules, improve the IPC layer, or add display functionality.
+  </Card>
+</CardGroup>
+
+## Get in touch
+
+- **Bug reports and feature requests**: [GitHub Issues](https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses/issues)
+- **Technical discussion**: [GitHub Discussions](https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses/discussions)
+- **Email**: iam5stilllearning@foxmail.com

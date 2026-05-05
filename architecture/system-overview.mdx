@@ -1,0 +1,101 @@
+---
+title: 'AI Smart Glasses system architecture and service layers'
+description: 'Explore the layered architecture of the AI Smart Glasses platform: hardware, system services, SDK, and application layers connected via Unix Domain Sockets.'
+---
+
+The AI Smart Glasses platform is organized into four distinct layers that cleanly separate hardware concerns from application logic. Traffic flows from user applications down through the SDK, into the system service tier, and ultimately to the physical hardware — with Unix Domain Sockets and shared memory handling all inter-process communication along the way.
+
+## Architecture layers
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Application Layer                        │
+│          User applications · Example programs               │
+└───────────────────────────┬─────────────────────────────────┘
+                             │ C API calls
+┌───────────────────────────▼─────────────────────────────────┐
+│                       SDK Layer                              │
+│        libai_glass_sdk.a / libai_glass_sdk.so               │
+│   GPIO · Camera · Audio · Display · Text events · IPC       │
+└───────────────────────────┬─────────────────────────────────┘
+                             │ Unix Domain Sockets + Shared Memory
+┌───────────────────────────▼─────────────────────────────────┐
+│                  System Services Layer                       │
+│  ai-core (media service) · display-service · guard (watchdog)│
+└───────────────────────────┬─────────────────────────────────┘
+                             │ Linux kernel interfaces
+┌───────────────────────────▼─────────────────────────────────┐
+│                     Hardware Layer                           │
+│    RV1106B SoC · Camera · GPIO buttons · Audio · Display    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Hardware layer
+
+The platform runs on the **Rockchip RV1106B SoC** (single Cortex-A7 core, embedded Linux). The core peripherals are:
+
+| Component | Specification |
+| --- | --- |
+| Camera | IMX219, 1080p video |
+| Display | JBD013 monocular, 640×480, 30° FOV (DisplayVersion only) |
+| Audio | Microphone + speaker |
+| GPIO | Physical buttons (GPIO 0, 1, 75) |
+| Connectivity | WiFi 802.11b/g/n, Bluetooth 5.3, USB 2.0 |
+
+<Warning>
+The camera is physically mounted at a 90° rotation in the reference glasses hardware. Any cloud-side or on-device vision pipeline must rotate the image before downstream processing.
+</Warning>
+
+## System services layer
+
+Three binaries run as system services on the device:
+
+- **ai-core** — the central hardware resource manager. It owns the camera, microphone, speaker, display pipeline, and GPIO hub. SDK clients connect to it via Unix Domain Sockets. See [AI Core Service](/architecture/ai-core-service) for details.
+- **display-service** — a dedicated framebuffer compositor for the JBD013 monocular display. It reads frames from shared memory and drives the SPI panel. See [Display Service](/architecture/display-service) for details.
+- **guard** — a watchdog process started by `/etc/init.d/S53_guard` that monitors ai-core and restarts it if it exits unexpectedly.
+
+## SDK layer
+
+The SDK ships as `libai_glass_sdk.a` (static) and `libai_glass_sdk.so` (shared). Applications link against one of these and include the headers from `SDK/ai_glass_sdk/include/`:
+
+| Header | Purpose |
+| --- | --- |
+| `ai_gpio.h` | GPIO event subscription |
+| `ai_camera.h` | Camera capture client |
+| `ai_audio.h` | Audio playback and recording |
+| `ai_display.h` | Display framebuffer client |
+| `ai_text_event.h` | ASR / LLM text stream listener |
+| `ai_ipc.h` | Low-level IPC primitives |
+
+## IPC: Unix Domain Sockets and shared memory
+
+All communication between SDK clients and system services uses two mechanisms:
+
+**Unix Domain Sockets** carry control messages — connection handshakes, commit notifications, focus requests, and configuration changes. The primary socket paths are:
+
+- `/tmp/ai-core_*` — ai-core service endpoints
+- `/tmp/ai_gpio_event_*` — GPIO event hub endpoints
+- `/tmp/ai_display_service` — display-service endpoint
+
+**Shared memory** (`/dev/shm/ai_*`) carries bulk data — image frames from the camera and rendered framebuffers for the display. This zero-copy design avoids redundant data copies across process boundaries, which matters on the constrained RV1106B platform.
+
+## Firmware variants
+
+Starting from v0.6.5, firmware ships in two variants:
+
+<CardGroup cols={2}>
+  <Card title="AudioVersion" icon="microphone">
+    Includes ai-core with GPIO, camera, and audio support. No display hardware or display-service. Use this for audio-only AI conversation workflows.
+  </Card>
+  <Card title="DisplayVersion" icon="monitor">
+    Includes everything in AudioVersion plus the JBD013 monocular display and the display-service daemon. Required for any UI rendering on the glasses.
+  </Card>
+</CardGroup>
+
+## ai-core is optional
+
+<Note>
+ai-core is a convenience service bundled for out-of-box AI conversation workflows. Developers can bypass it entirely and access hardware directly through the Rockchip SDK. Use ai-core when its built-in workflow fits your needs; use the raw SDK when you need full control.
+</Note>
+
+To disable ai-core and guard, remove or rename `/etc/init.d/S53_guard`, reboot the device, and verify with `top` that neither process is running. The SDK's IPC and shared memory interfaces remain available for any replacement service you build.

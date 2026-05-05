@@ -1,0 +1,146 @@
+---
+title: "Set up the AI Glasses development environment"
+description: "Install and configure the AIGLASS_DEV_ENV build toolchain on Ubuntu, Debian, or Windows with WSL2 to compile AI Smart Glasses firmware."
+---
+
+The AI Smart Glasses build system runs on Ubuntu or Debian — either natively on Linux or inside a WSL2 environment on Windows. Everything you need, from the cross-compiler to build scripts, is bundled in the `AIGLASS_DEV_ENV` repository. This guide walks you through cloning that repository, installing dependencies, and building your first firmware image.
+
+<Tabs>
+  <Tab title="Linux (Ubuntu/Debian)">
+    <Steps>
+      <Step title="Clone the development environment">
+        Clone the `AIGLASS_DEV_ENV` repository to your host machine:
+
+        ```bash
+        git clone https://github.com/makevary/AIGLASS_DEV_ENV.git
+        cd AIGLASS_DEV_ENV
+        ```
+      </Step>
+
+      <Step title="Install build dependencies">
+        Run the setup script to enable the `i386` architecture, update the `apt` package index, and install all required build tools (`cmake`, `bison`, `flex`, `texinfo`, `gperf`, multilib support, and more):
+
+        ```bash
+        ./setup_build_env.sh
+        ```
+
+        The script runs non-interactively and requires `sudo` access. If it exits without any `ERROR` lines, all dependencies were installed successfully.
+      </Step>
+
+      <Step title="Build the firmware">
+        Choose the build variant that matches your hardware:
+
+        ```bash
+        # Device with display capability (default)
+        ./build.sh
+
+        # Device without display capability
+        ./build.sh --without-display
+        ```
+
+        The `--without-display` flag disables the display startup service (`skip S60_app_launcher`). Use it only if your hardware has no display attached.
+      </Step>
+
+      <Step title="Verify the output image">
+        After the build completes, confirm the firmware image was produced:
+
+        ```bash
+        ls -lh output/image/update.img
+        ```
+
+        A non-zero file size confirms a successful build.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Windows + WSL2">
+    <Steps>
+      <Step title="Enable WSL2 and install Ubuntu/Debian">
+        Open PowerShell as administrator and run:
+
+        ```bash
+        wsl --install
+        ```
+
+        After restarting, open the Ubuntu (or Debian) app from the Start menu and complete the initial user setup.
+      </Step>
+
+      <Step title="Clone the development environment inside WSL2">
+        In your WSL2 terminal, clone the repository:
+
+        ```bash
+        git clone https://github.com/makevary/AIGLASS_DEV_ENV.git
+        cd AIGLASS_DEV_ENV
+        ```
+
+        Keep all project files inside the WSL2 filesystem (e.g., `~/AIGLASS_DEV_ENV`), not on a Windows-mounted drive such as `/mnt/c/`. Accessing Windows drives from WSL2 is significantly slower and can cause build failures.
+      </Step>
+
+      <Step title="Install build dependencies">
+        ```bash
+        ./setup_build_env.sh
+        ```
+
+        The setup script uses `apt-get`, which is available inside WSL2 Ubuntu/Debian distributions.
+      </Step>
+
+      <Step title="Build the firmware">
+        ```bash
+        # Device with display capability
+        ./build.sh
+
+        # Device without display capability
+        ./build.sh --without-display
+        ```
+      </Step>
+
+      <Step title="Verify the output image">
+        ```bash
+        ls -lh output/image/update.img
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Verify the toolchain
+
+After setup, confirm the core tools are available and the cross-compiler is on your `PATH`:
+
+```bash
+# Core build tools
+cmake --version
+bison --version
+flex --version
+
+# Cross-compiler (installed by setup_build_env.sh)
+arm-rockchip831-linux-uclibcgnueabihf-gcc --version
+```
+
+All four commands should print version information without errors.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="`apt-get` not found">
+    `setup_build_env.sh` depends on `apt-get` and only runs on Debian-based systems. If you are on a non-Debian Linux distribution, use WSL2 with Ubuntu or Debian instead.
+  </Accordion>
+
+  <Accordion title="Permission denied when running setup_build_env.sh">
+    The script requires `sudo` privileges. Make sure you are logged in as a user with `sudo` access, or run it as root:
+
+    ```bash
+    sudo ./setup_build_env.sh
+    ```
+  </Accordion>
+
+  <Accordion title="Missing build dependencies after setup">
+    Re-run the setup script — it is safe to run multiple times:
+
+    ```bash
+    ./setup_build_env.sh
+    ```
+
+    If the build still fails, capture the full output from `./build.sh` and look for the first `ERROR` line to identify the missing dependency.
+  </Accordion>
+</AccordionGroup>

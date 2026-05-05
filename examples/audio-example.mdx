@@ -1,0 +1,289 @@
+---
+title: "Audio playback and recording example for AI Glasses"
+description: "Play PCM audio, control SDK-driven recording, arbitrate camera and audio resources, and suppress ai-core button actions on AI Smart Glasses."
+---
+
+The audio client communicates with `ai-core` over a Unix socket, giving your application full control over PCM playback, recording, volume, and resource arbitration. You can also disable `ai-core`'s built-in button reactions while your own logic handles physical button events via the GPIO client, then re-enable them when you are done.
+
+## Prerequisites
+
+Start `ai-core` before connecting. For SDK-controlled recording, also enable the GPIO recording loop:
+
+```bash
+# Basic audio (playback only)
+./ai-core
+
+# With GPIO recording loop (required for ai_audio_record_start)
+./ai-core --enable-gpio
+```
+
+## Playback
+
+<Steps>
+  <Step title="Initialize the client">
+    Pass `NULL` to use the default socket path `/tmp/ai-core_audio_ctrl`:
+
+    ```c
+    #include "ai_audio.h"
+
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) {
+        fprintf(stderr, "Failed to connect to audio service\n");
+        return -1;
+    }
+    ```
+  </Step>
+  <Step title="Set playback parameters">
+    Fill `ai_audio_params_t` with your file path and optional overrides. Pass `-1` for any field to use the server's default:
+
+    ```c
+    ai_audio_params_t params = {
+        .file_path   = "/path/to/audio.pcm",
+        .volume      = 80,     // 0–100, or -1 for default
+        .force       = 0,      // 0 = queue, 1 = interrupt current playback
+        .sample_rate = 48000,  // Hz, or -1 for default
+        .channels    = -1,     // -1 for default
+        .bit_width   = -1      // 8/16/24/32, or -1 for default
+    };
+    ```
+  </Step>
+  <Step title="Play and clean up">
+    ```c
+    int rc = ai_audio_play(client, &params);
+    if (rc != AI_AUDIO_SUCCESS) {
+        fprintf(stderr, "Playback failed: %s\n",
+                ai_audio_get_error_string(rc));
+    }
+
+    ai_audio_cleanup(client);
+    ```
+  </Step>
+</Steps>
+
+For one-shot playback with all defaults, use the simplified helper:
+
+```c
+ai_audio_play_simple(client, "/path/to/audio.pcm");
+```
+
+To stop playback at any time:
+
+```c
+ai_audio_stop(client);
+```
+
+## Recording
+
+<Steps>
+  <Step title="Initialize the client">
+    ```c
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) {
+        return -1;
+    }
+    ```
+  </Step>
+  <Step title="Start recording">
+    ```c
+    int rc = ai_audio_record_start(client);
+    if (rc != AI_AUDIO_SUCCESS) {
+        fprintf(stderr, "Record start failed: %s\n",
+                ai_audio_get_error_string(rc));
+        ai_audio_cleanup(client);
+        return -1;
+    }
+    ```
+
+    Verify the recording state after starting:
+
+    ```c
+    int recording = 0;
+    ai_audio_record_get_status(client, &recording);
+    printf("Recording: %s\n", recording ? "yes" : "no");
+    ```
+  </Step>
+  <Step title="Stop recording and retrieve the file path">
+    ```c
+    char output_path[512] = {0};
+    rc = ai_audio_record_stop(client, output_path, (int)sizeof(output_path));
+    if (rc == AI_AUDIO_SUCCESS) {
+        printf("Recording saved to: %s\n", output_path);
+    }
+    ```
+
+    `output_path` receives the path to the PCM file written by `ai-core`. Copy the file if you need it to persist beyond the next recording session.
+  </Step>
+  <Step title="Clean up">
+    ```c
+    ai_audio_cleanup(client);
+    ```
+  </Step>
+</Steps>
+
+## Playback vs. recording patterns
+
+<CodeGroup>
+
+```c playback.c
+#include "ai_audio.h"
+#include <stdio.h>
+
+int main(void) {
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) return -1;
+
+    ai_audio_params_t params = {
+        .file_path   = "/tmp/alert.pcm",
+        .volume      = 80,
+        .force       = 1,      // interrupt any current playback
+        .sample_rate = 48000,
+        .channels    = -1,
+        .bit_width   = -1
+    };
+
+    int rc = ai_audio_play(client, &params);
+    if (rc != AI_AUDIO_SUCCESS) {
+        fprintf(stderr, "Error: %s\n", ai_audio_get_error_string(rc));
+    }
+
+    ai_audio_cleanup(client);
+    return (rc == AI_AUDIO_SUCCESS) ? 0 : -1;
+}
+```
+
+```c recording.c
+#include "ai_audio.h"
+#include <stdio.h>
+
+int main(void) {
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) return -1;
+
+    // Start recording
+    int rc = ai_audio_record_start(client);
+    if (rc != AI_AUDIO_SUCCESS) {
+        fprintf(stderr, "Start failed: %s\n", ai_audio_get_error_string(rc));
+        ai_audio_cleanup(client);
+        return -1;
+    }
+
+    printf("Recording... press ENTER to stop.\n");
+    (void)getchar();
+
+    // Stop and get the output path
+    char path[512] = {0};
+    rc = ai_audio_record_stop(client, path, (int)sizeof(path));
+    if (rc == AI_AUDIO_SUCCESS) {
+        printf("Saved to: %s\n", path);
+    }
+
+    ai_audio_cleanup(client);
+    return 0;
+}
+```
+
+</CodeGroup>
+
+## Resource arbitration
+
+When your app needs exclusive access to the camera or audio device, ask `ai-core` to release them first. Use the `AI_AUDIO_RESOURCE_*` bitmask constants:
+
+```c
+// Release both camera and audio to your app
+ai_audio_suspend_resources(client, AI_AUDIO_RESOURCE_ALL);
+
+// ... use the hardware directly ...
+
+// Return resources to ai-core
+ai_audio_resume_resources(client, AI_AUDIO_RESOURCE_ALL);
+```
+
+You can also suspend each resource individually:
+
+| Constant | Value | Resource |
+|---|---|---|
+| `AI_AUDIO_RESOURCE_CAMERA` | `0x01` | Camera |
+| `AI_AUDIO_RESOURCE_AUDIO` | `0x02` | Audio |
+| `AI_AUDIO_RESOURCE_ALL` | `0x03` | Both |
+
+Query the current state with `ai_audio_get_resource_status()`:
+
+```c
+ai_audio_resource_status_t status;
+ai_audio_get_resource_status(client, &status);
+printf("Camera suspended: %d, Audio suspended: %d\n",
+       status.camera_suspended, status.audio_suspended);
+```
+
+## Suppressing ai-core button actions
+
+By default, `ai-core` reacts to physical button presses (for example, starting a voice query). When your application needs to intercept button events itself via the GPIO client, disable `ai-core`'s built-in reactions:
+
+```c
+// Disable ai-core button actions; GPIO events still fire normally
+ai_audio_set_disable_aicore_physical_actions(client, 1);
+
+// ... your button-handling logic ...
+
+// Restore default behavior when done
+ai_audio_set_disable_aicore_physical_actions(client, 0);
+```
+
+Query the current state:
+
+```c
+int disabled = 0;
+ai_audio_get_disable_aicore_physical_actions(client, &disabled);
+printf("Physical actions disabled: %d\n", disabled);
+```
+
+## Compile
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_audio_app my_audio_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+```
+
+Build the bundled examples:
+
+```bash
+cd examples/audio_play_example && make
+cd examples/record_audio_example && make
+```
+
+Run the audio playback example:
+
+```bash
+./../build/audio_play_example -f /path/to/audio.pcm -v 80 -r 48000
+```
+
+Run the recording example:
+
+```bash
+./../build/record_audio_example
+```
+
+## API summary
+
+| Function | Description |
+|---|---|
+| `ai_audio_init(socket_path)` | Connect to `ai-core`; pass `NULL` for default path |
+| `ai_audio_play(client, params)` | Queue or force-play a PCM file |
+| `ai_audio_play_simple(client, path)` | Play with all defaults |
+| `ai_audio_stop(client)` | Stop the current playback |
+| `ai_audio_record_start(client)` | Start recording via SDK command |
+| `ai_audio_record_get_status(client, recording)` | Query recording state |
+| `ai_audio_record_stop(client, path, size)` | Stop recording and return the file path |
+| `ai_audio_suspend_resources(client, mask)` | Ask `ai-core` to release resources |
+| `ai_audio_resume_resources(client, mask)` | Ask `ai-core` to reclaim resources |
+| `ai_audio_get_resource_status(client, status)` | Query resource ownership |
+| `ai_audio_set_disable_aicore_physical_actions(client, disabled)` | Enable/disable built-in button reactions |
+| `ai_audio_cleanup(client)` | Disconnect and free the client handle |
+
+<Warning>
+  `ai_audio_record_start()` requires `ai-core` to be running with `--enable-gpio` so the recording loop is active. Without it, the call returns an error.
+</Warning>

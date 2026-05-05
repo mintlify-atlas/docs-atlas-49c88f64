@@ -1,0 +1,369 @@
+---
+title: "HTTP and WebSocket networking examples for AI Glasses"
+description: "Make HTTP GET and POST requests and open persistent WebSocket connections from AI Smart Glasses apps using the SDK http_client and ws_client APIs."
+---
+
+The AI Glass SDK includes two network client APIs: `http_client` for synchronous HTTP requests and `ws_client` for event-driven WebSocket connections. Both are built on the [Mongoose](https://mongoose.ws) networking library, which is bundled under `third_party/mongoose/` in the SDK. The raw Mongoose API is also available directly if you need lower-level control (see `samples/http/post_example.c`).
+
+<Tabs>
+  <Tab title="HTTP">
+
+## HTTP client
+
+`http_client.h` provides synchronous request helpers for GET, POST, PUT, and DELETE. Every successful call allocates response memory that you must free with `http_response_free()`.
+
+### Data types
+
+```c
+typedef enum {
+    HTTP_GET,
+    HTTP_POST,
+    HTTP_PUT,
+    HTTP_DELETE
+} http_method_t;
+
+typedef struct {
+    int    status_code;   // e.g. 200, 404
+    char  *body;          // response body (null-terminated)
+    size_t body_len;      // response body length in bytes
+    char  *headers;       // response headers (optional)
+    size_t headers_len;
+} http_response_t;
+
+typedef struct {
+    const char  *url;
+    http_method_t method;
+    const char  *headers;    // "Key: Value\r\nKey2: Value2\r\n"
+    const char  *body;       // request body for POST/PUT
+    size_t       body_len;
+    int          timeout_ms;
+} http_request_t;
+```
+
+### HTTP GET
+
+```c
+#include "http_client.h"
+#include <stdio.h>
+
+int main(void) {
+    http_response_t resp;
+    int ret = http_get("http://api.example.com/status", &resp);
+
+    if (ret == 0) {
+        printf("Status: %d\n", resp.status_code);
+        printf("Body: %.*s\n", (int)resp.body_len, resp.body);
+        http_response_free(&resp);
+    } else {
+        fprintf(stderr, "GET failed\n");
+    }
+    return ret;
+}
+```
+
+### HTTP POST (JSON)
+
+```c
+const char *json = "{\"text\":\"Hello from AI Glasses\",\"voice\":\"default\"}";
+http_response_t resp;
+
+int ret = http_post_json("http://api.example.com/tts", json, &resp);
+if (ret == 0) {
+    printf("Response [%d]: %.*s\n",
+           resp.status_code, (int)resp.body_len, resp.body);
+    http_response_free(&resp);
+}
+```
+
+### Custom request with headers
+
+Use `http_request()` for full control over method, headers, and timeout:
+
+```c
+http_request_t req = {
+    .url        = "http://api.example.com/infer",
+    .method     = HTTP_POST,
+    .headers    = "Authorization: Bearer my-token\r\n"
+                  "Content-Type: application/json\r\n",
+    .body       = "{\"prompt\":\"describe image\"}",
+    .body_len   = 26,
+    .timeout_ms = 10000
+};
+
+http_response_t resp;
+int ret = http_request(&req, &resp);
+if (ret == 0) {
+    printf("Status: %d\n", resp.status_code);
+    http_response_free(&resp);
+}
+```
+
+### HTTP workflow
+
+<Steps>
+  <Step title="Build the request">
+    For simple cases use `http_get()`, `http_post_json()`, or `http_post_form()`. For custom headers or a timeout, fill `http_request_t` and call `http_request()`.
+  </Step>
+  <Step title="Check the return value">
+    `0` means the transport succeeded. Check `resp.status_code` to confirm the server accepted the request (e.g. `200`, `201`).
+  </Step>
+  <Step title="Read and free the response">
+    `resp.body` and `resp.headers` are heap-allocated. Always call `http_response_free(&resp)` when you are done.
+  </Step>
+  <Step title="Compile">
+    ```bash
+    arm-rockchip831-linux-uclibcgnueabihf-gcc \
+        -o my_http_app my_http_app.c \
+        -I/path/to/ai_glass_sdk/include \
+        -L/path/to/ai_glass_sdk/lib \
+        -lai_glass_sdk \
+        -lpthread -lrt
+    ```
+
+    Or build the bundled example:
+
+    ```bash
+    cd examples/http_example && make
+    ./../build/http_example http://httpbin.org/get
+    ```
+  </Step>
+</Steps>
+
+### Convenience functions
+
+| Function | Description |
+|---|---|
+| `http_get(url, resp)` | HTTP GET |
+| `http_post_json(url, json, resp)` | POST with `Content-Type: application/json` |
+| `http_post(url, content_type, body, len, resp)` | POST with custom content type |
+| `http_post_form(url, form_data, resp)` | POST with `application/x-www-form-urlencoded` |
+| `http_put(url, content_type, body, len, resp)` | HTTP PUT |
+| `http_delete(url, resp)` | HTTP DELETE |
+| `http_request(req, resp)` | Full-control request |
+| `http_response_free(resp)` | Free response memory |
+
+  </Tab>
+  <Tab title="WebSocket">
+
+## WebSocket client
+
+`ws_client.h` provides an event-driven WebSocket client. The event loop runs in a thread you create; your `ws_event_cb` callback receives all connection lifecycle and message events.
+
+### Data types
+
+```c
+typedef enum {
+    WS_EVENT_CONNECTED,
+    WS_EVENT_DISCONNECTED,
+    WS_EVENT_MESSAGE,
+    WS_EVENT_ERROR
+} ws_event_type_t;
+
+typedef void (*ws_event_cb)(
+    ws_event_type_t  event,
+    const char      *data,
+    size_t           len,
+    void            *user_data
+);
+```
+
+### Complete example
+
+```c
+#include "ws_client.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h>
+
+static ws_client_t   *g_client  = NULL;
+static volatile int   g_running = 1;
+
+void ws_callback(ws_event_type_t event, const char *data,
+                 size_t len, void *user_data) {
+    switch (event) {
+        case WS_EVENT_CONNECTED:
+            printf("Connected\n");
+            // Send a greeting immediately on connect
+            ws_client_send_text(g_client,
+                "{\"type\":\"hello\",\"message\":\"Hello from AI Glasses\"}");
+            break;
+
+        case WS_EVENT_MESSAGE:
+            printf("Received (%zu bytes): %.*s\n", len, (int)len, data);
+            break;
+
+        case WS_EVENT_DISCONNECTED:
+            printf("Disconnected\n");
+            g_running = 0;
+            break;
+
+        case WS_EVENT_ERROR:
+            fprintf(stderr, "Error: %.*s\n", (int)len, data);
+            g_running = 0;
+            break;
+    }
+}
+
+void *ws_thread(void *arg) {
+    ws_client_run((ws_client_t *)arg);  // blocks until stopped
+    return NULL;
+}
+
+void signal_handler(int sig) {
+    g_running = 0;
+    if (g_client) ws_client_stop(g_client);
+}
+
+int main(void) {
+    signal(SIGINT, signal_handler);
+
+    g_client = ws_client_create("ws://192.168.1.100:8080/stream",
+                                ws_callback, NULL);
+    if (!g_client) {
+        fprintf(stderr, "Failed to create WebSocket client\n");
+        return -1;
+    }
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, ws_thread, g_client);
+
+    // Wait for connection, then send messages
+    sleep(2);
+    while (g_running) {
+        ws_client_send_text(g_client, "{\"type\":\"ping\"}");
+        sleep(5);
+    }
+
+    ws_client_stop(g_client);
+    pthread_join(thread, NULL);
+    ws_client_destroy(g_client);
+    return 0;
+}
+```
+
+### Sending binary data
+
+```c
+uint8_t frame_data[] = {0x01, 0x02, 0x03, 0xFF};
+ws_client_send_binary(g_client, frame_data, sizeof(frame_data));
+```
+
+### TLS / WSS connections
+
+For `wss://` URLs, configure SSL before the event loop starts:
+
+```c
+// Skip certificate verification (useful on embedded targets without a CA store)
+ws_client_set_skip_verification(g_client, 1);
+
+// Or provide PEM strings for mutual TLS
+ws_client_set_ssl(g_client,
+    ca_cert_pem,    // CA certificate (NULL = skip server verification)
+    client_cert_pem, // client certificate (optional)
+    client_key_pem   // client private key (optional)
+);
+```
+
+### WebSocket workflow
+
+<Steps>
+  <Step title="Create the client">
+    Call `ws_client_create(url, callback, user_data)`. This does not connect yet — it only allocates the handle.
+  </Step>
+  <Step title="Optionally configure TLS">
+    For `wss://` endpoints, call `ws_client_set_ssl()` or `ws_client_set_skip_verification()` before starting the loop.
+  </Step>
+  <Step title="Start the event loop in a thread">
+    Call `ws_client_run(client)` from a dedicated thread. It blocks until `ws_client_stop()` is called.
+  </Step>
+  <Step title="Send and receive messages">
+    Use `ws_client_send_text()` and `ws_client_send_binary()` from any thread. Incoming messages arrive in `WS_EVENT_MESSAGE` callbacks.
+  </Step>
+  <Step title="Stop and destroy">
+    Call `ws_client_stop(client)`, join the thread, then `ws_client_destroy(client)`.
+  </Step>
+  <Step title="Compile">
+    ```bash
+    arm-rockchip831-linux-uclibcgnueabihf-gcc \
+        -o my_ws_app my_ws_app.c \
+        -I/path/to/ai_glass_sdk/include \
+        -L/path/to/ai_glass_sdk/lib \
+        -lai_glass_sdk \
+        -lpthread -lrt
+    ```
+
+    Or build the bundled example:
+
+    ```bash
+    cd examples/websocket_example && make
+    ./../build/ws_example ws://localhost:8080/
+    ```
+  </Step>
+</Steps>
+
+### API summary
+
+| Function | Description |
+|---|---|
+| `ws_client_create(url, cb, user_data)` | Allocate the client and register the callback |
+| `ws_client_set_ssl(client, ca, cert, key)` | Configure TLS certificates (PEM strings) |
+| `ws_client_set_skip_verification(client, skip)` | Skip TLS certificate verification |
+| `ws_client_run(client)` | Run the event loop (blocking) |
+| `ws_client_send_text(client, text)` | Send a UTF-8 text frame |
+| `ws_client_send_binary(client, data, len)` | Send a binary frame |
+| `ws_client_stop(client)` | Signal the event loop to exit |
+| `ws_client_destroy(client)` | Free the client handle |
+
+  </Tab>
+</Tabs>
+
+## Using Mongoose directly
+
+The `samples/http/` directory contains a lower-level example using the Mongoose API directly. This is useful when you need streaming responses or a persistent connection that outlives a single request:
+
+```c
+#include "mongoose.h"
+
+static const char *s_url       = "http://127.0.0.1:5000/classify";
+static const char *s_post_data = "{\"text\": \"This is a great day!\"}";
+
+static void fn(struct mg_connection *c, int ev, void *ev_data) {
+    if (ev == MG_EV_CONNECT) {
+        mg_printf(c,
+                  "POST /classify HTTP/1.1\r\n"
+                  "Host: 127.0.0.1\r\n"
+                  "Content-Type: application/json\r\n"
+                  "Content-Length: %d\r\n\r\n"
+                  "%s",
+                  (int)strlen(s_post_data), s_post_data);
+    } else if (ev == MG_EV_HTTP_MSG) {
+        struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+        fwrite(hm->body.buf, 1, hm->body.len, stdout);
+        printf("\n");
+        c->is_closing = 1;
+    }
+}
+
+int main(void) {
+    struct mg_mgr mgr;
+    mg_mgr_init(&mgr);
+    mg_http_connect(&mgr, s_url, fn, NULL);
+    for (;;) mg_mgr_poll(&mgr, 1000);
+    mg_mgr_free(&mgr);
+    return 0;
+}
+```
+
+Compile the Mongoose sample with:
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o post_example post_example.c mongoose.c \
+    -I. -lpthread
+```
+
+<Note>
+  `mongoose.c` and `mongoose.h` are in `samples/http/`. The SDK's `http_client` and `ws_client` libraries already wrap Mongoose internally, so you only need to use the raw Mongoose API when the higher-level helpers do not cover your use case.
+</Note>

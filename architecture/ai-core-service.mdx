@@ -1,0 +1,137 @@
+---
+title: 'AI Core Service: Hardware Resource Manager'
+description: 'How ai-core manages camera, microphone, speaker, GPIO, and display — startup modes, IPC socket paths, privacy notes, and when to use the raw Rockchip SDK instead.'
+---
+
+`ai-core` is the central hardware resource manager on the AI Smart Glasses platform. It runs as a persistent background process and owns exclusive access to the camera, microphone, speaker, display pipeline, and GPIO hub. SDK clients from one or more user applications connect to it over Unix Domain Sockets and request hardware operations without needing direct kernel-level access.
+
+<Note>
+ai-core is optional. It ships as a convenience service for developers who want an out-of-box AI conversation workflow. You can bypass it entirely and drive hardware directly through the Rockchip SDK if your use case requires it.
+</Note>
+
+## Startup and process supervision
+
+ai-core is launched and supervised by **guard**, a system sentinel process. The startup chain is:
+
+<Steps>
+  <Step title="Init script runs at boot">
+    `/etc/init.d/S53_guard` is executed by the Linux init system. It starts the `guard` binary.
+  </Step>
+  <Step title="Guard starts ai-core">
+    `guard` spawns `ai-core` with the configured startup flags and monitors its process ID.
+  </Step>
+  <Step title="Guard restarts on exit">
+    If ai-core exits for any reason — crash, OOM kill, or unexpected shutdown — guard restarts it automatically.
+  </Step>
+</Steps>
+
+## Startup modes
+
+ai-core accepts command-line flags to enable specific hardware subsystems. You can combine flags to activate multiple subsystems in one invocation:
+
+```bash
+# GPIO hub only
+./ai-core --enable-gpio --gpio-number 1 --gpio-numbers 0,1,75
+
+# Camera with JPEG output
+./ai-core --enable-camera --enable-jpeg
+
+# Combined: GPIO + camera
+./ai-core --enable-gpio --enable-camera
+
+# Full AI conversation mode (GPIO + camera + audio + AI pipeline)
+./ai-core
+```
+
+When running in full mode with no flags, ai-core activates all subsystems and starts the bundled AI conversation pipeline.
+
+## IPC socket paths
+
+SDK clients locate ai-core by connecting to well-known Unix Domain Socket paths:
+
+| Path | Purpose |
+| --- | --- |
+| `/tmp/ai-core_*` | Main ai-core service endpoints (camera, audio, text events) |
+| `/tmp/ai_gpio_event_*` | GPIO event hub endpoints |
+| `/tmp/ai_display_service` | Display service endpoint (separate process) |
+
+To inspect active sockets and verify the service is reachable:
+
+```bash
+ls -la /tmp/ai-core_* /tmp/ai_gpio_event_*
+```
+
+## Shared memory paths
+
+Camera frames and display buffers are exchanged through POSIX shared memory rather than socket payloads, keeping data copies to zero:
+
+```bash
+ls -la /dev/shm/ai_*
+```
+
+The camera shared memory region is 2 MB — sufficient for a full 1920×1080 frame in either JPEG or NV12 format. Multiple SDK clients can read from it concurrently; the region is created on the first client connection and cleaned up on the last disconnect.
+
+## Privacy notice
+
+<Warning>
+When ai-core is running in AI conversation mode, pressing the glasses button to speak may cause ai-core to capture a photo and upload it to cloud services for real-time visual recognition. Images are used only for real-time processing and **are not persistently stored**. If this is unacceptable for your deployment, disable ai-core using the steps below.
+</Warning>
+
+## Disabling ai-core and guard
+
+If you want to work directly with the Rockchip SDK, or simply do not need the bundled AI services, you can disable the entire guard + ai-core stack:
+
+<Steps>
+  <Step title="Remove or rename the init script">
+    ```bash
+    # Rename to prevent execution at next boot
+    mv /etc/init.d/S53_guard /etc/init.d/S53_guard.disabled
+    ```
+  </Step>
+  <Step title="Reboot the device">
+    ```bash
+    reboot
+    ```
+  </Step>
+  <Step title="Verify neither process is running">
+    ```bash
+    top
+    # Confirm 'ai-core' and 'guard' are absent from the process list
+    ```
+  </Step>
+</Steps>
+
+## ai-core vs. raw Rockchip SDK
+
+| | ai-core | Raw Rockchip SDK |
+| --- | --- | --- |
+| **Setup effort** | Low — hardware already managed | High — must initialize each subsystem |
+| **GPIO access** | SDK subscription API, < 13 ms latency | Direct kernel GPIO sysfs / ioctl |
+| **Camera access** | Zero-copy shared memory | Direct V4L2 or RKIPC API |
+| **Multi-client** | Built-in arbitration | Must implement yourself |
+| **AI conversation** | Built-in, out of the box | Not included |
+| **Control** | Limited to ai-core's exposed interface | Full hardware control |
+
+Use ai-core when its built-in workflow aligns with your application. Use the raw Rockchip SDK when you need subsystem access that ai-core does not expose, or when you want to replace its AI pipeline entirely.
+
+## Troubleshooting
+
+If SDK clients fail to connect, run the following diagnostics:
+
+```bash
+# Check whether ai-core and guard are running
+ps aux | grep ai-core
+ps aux | grep guard
+
+# Check IPC socket files
+ls -la /tmp/ai-core_* /tmp/ai_gpio_event_*
+
+# Check shared memory segments
+ls -la /dev/shm/ai_*
+
+# Check GPIO hardware state directly
+cat /sys/class/gpio/gpio1/value
+
+# Check camera device nodes
+ls -la /dev/video*
+```

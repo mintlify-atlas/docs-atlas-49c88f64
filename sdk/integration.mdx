@@ -1,0 +1,228 @@
+---
+title: "Integrate the AI Glass SDK into your C project"
+description: "Link libai_glass_sdk into a C project with the ARM toolchain, choose static or shared linking, and deploy your binary to the device over ADB."
+---
+
+Integrating the AI Glass SDK into your own C project involves three steps: pointing the compiler at the SDK headers, linking against `libai_glass_sdk`, and deploying the compiled binary to the device. The SDK requires two system libraries — `pthread` and `rt` — which must appear after `-lai_glass_sdk` on the link line.
+
+## Compiler invocation
+
+The full link command using the ARM cross-compiler is:
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_app my_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+```
+
+Replace `/path/to/ai_glass_sdk` with the absolute path to the SDK directory in your workspace.
+
+## Static vs shared library
+
+The SDK ships both a static archive and a shared object. Choose the one that fits your deployment requirements.
+
+<CodeGroup>
+
+```bash static library (.a)
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_app my_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+```
+
+```bash shared library (.so)
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_app my_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+# Push libai_glass_sdk.so to the device alongside my_app
+```
+
+</CodeGroup>
+
+| | Static (`.a`) | Shared (`.so`) |
+| --- | --- | --- |
+| **Binary size** | Larger — SDK code is embedded | Smaller — SDK code loaded at runtime |
+| **Deployment** | Single binary, no extra files needed | Requires `libai_glass_sdk.so` on the device |
+| **Updates** | Rebuild binary to pick up SDK updates | Replace `.so` on device without recompiling |
+| **Recommendation** | Simpler for initial development and one-off deploys | Preferred when multiple applications share the SDK |
+
+## Makefile template
+
+Use this template as a starting point for your own project `Makefile`. Adjust `SDK_PATH` to match your workspace layout.
+
+```makefile
+# Path to the AI Glass SDK (adjust for your workspace)
+SDK_PATH    := ../../ai_glass_sdk
+
+# ARM cross-compiler toolchain
+TOOLCHAIN   := arm-rockchip831-linux-uclibcgnueabihf
+CC          := $(TOOLCHAIN)-gcc
+
+# Compiler and linker flags
+CFLAGS      := -Wall -g -O2 -std=gnu99 -D_GNU_SOURCE
+CFLAGS      += -I$(SDK_PATH)/include
+LDFLAGS     := -L$(SDK_PATH)/lib -lai_glass_sdk -lpthread -lrt
+
+# Source and output
+TARGET      := my_app
+SRCS        := my_app.c
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+clean:
+	rm -f $(TARGET)
+
+.PHONY: all clean
+```
+
+## Integration workflow
+
+<Steps>
+  <Step title="Include the relevant headers">
+    Add `#include` directives for the SDK modules your application uses. All headers are in `include/`.
+
+    ```c
+    #include "ai_gpio.h"
+    #include "ai_camera.h"
+    #include "ai_audio.h"
+    #include "ai_display.h"
+    #include "ai_text_event.h"
+    #include "ai_log.h"
+    ```
+  </Step>
+  <Step title="Write your application">
+    Implement your application logic using the SDK APIs. See the minimal GPIO example below for a complete working pattern.
+  </Step>
+  <Step title="Cross-compile for ARM">
+    Run `make` in your project directory. The output binary targets the RK1106B/RV1103B ARM platform.
+
+    ```bash
+    make
+    ```
+  </Step>
+  <Step title="Push the binary to the device">
+    Use ADB to transfer the binary to the device.
+
+    ```bash
+    adb push my_app /tmp/my_app
+    ```
+
+    If you linked against the shared library, push it too:
+
+    ```bash
+    adb push /path/to/ai_glass_sdk/lib/libai_glass_sdk.so /tmp/libai_glass_sdk.so
+    ```
+  </Step>
+  <Step title="Set executable permissions and run">
+    Mark the binary as executable and run it over ADB shell.
+
+    ```bash
+    adb shell chmod +x /tmp/my_app
+    adb shell /tmp/my_app
+    ```
+  </Step>
+</Steps>
+
+## Minimal integration example
+
+The following is a complete, working GPIO subscriber taken directly from the SDK README. It subscribes to button events on a single GPIO, prints press events, and cleans up on `Ctrl+C`.
+
+<Note>
+  Make sure `ai-core` is running with GPIO enabled before executing this program: `./ai-core --enable-gpio --gpio-number 1 --gpio-numbers 0,1,75`
+</Note>
+
+```c
+#include "ai_gpio.h"
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+
+static volatile int running = 1;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    running = 0;
+}
+
+static void my_callback(gpio_event_t event, int gpio, void *data) {
+    (void)data;
+    if (event == GPIO_EVENT_PRESS) {
+        printf("Button pressed GPIO%d\n", gpio);
+    }
+}
+
+int main(void) {
+    gpio_event_client_t client = {0};
+    signal(SIGINT, signal_handler);
+
+    ai_gpio_event_client_create(&client);
+    ai_gpio_event_client_connect(&client);
+    ai_gpio_event_client_subscribe(&client, my_callback, NULL);
+
+    while (running) {
+        sleep(1);
+    }
+
+    ai_gpio_event_client_unsubscribe(&client);
+    ai_gpio_event_client_destroy(&client);
+    return 0;
+}
+```
+
+Compile and run it:
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o gpio_subscriber gpio_subscriber.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk -lpthread -lrt
+
+adb push gpio_subscriber /tmp/gpio_subscriber
+adb shell chmod +x /tmp/gpio_subscriber
+adb shell /tmp/gpio_subscriber -g 75
+```
+
+## Troubleshooting
+
+### Client connection failure
+
+If any `_connect()` or `_init()` call fails, check that `ai-core` is running and that its socket and shared memory files are present.
+
+```bash
+# Verify ai-core is running
+ps aux | grep ai-core
+
+# Check Unix socket files
+ls -la /tmp/ai-core_* /tmp/ai_gpio_event_*
+
+# Check shared memory regions
+ls -la /dev/shm/ai_*
+```
+
+### GPIO events not received
+
+Confirm the GPIO hardware is active and the correct pin number was passed to `ai-core` at startup.
+
+```bash
+cat /sys/class/gpio/gpio1/value
+```
+
+### Camera capture timeout
+
+Check that the camera device node exists and that `ai-core` was started with `--enable-camera`.
+
+```bash
+ls -la /dev/video*
+```

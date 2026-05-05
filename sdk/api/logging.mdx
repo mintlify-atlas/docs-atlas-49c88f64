@@ -1,0 +1,218 @@
+---
+title: "Logging API — log_info, log_error, log_debug, log_warn"
+description: "Printf-style logging with automatic millisecond timestamps across four severity levels. A zero-dependency drop-in for printf in any AI Glass SDK application."
+---
+
+The Log API provides four functions — `log_info()`, `log_error()`, `log_debug()`, and `log_warn()` — that work exactly like `printf` but prepend a millisecond-precision timestamp to every line. Because the implementation calls `vprintf()` directly, it supports all format specifiers, character sets, and emoji without any encoding conversion. The entire implementation is compiled into `libai_glass_sdk` so you only need to include the header and link the library you were already using.
+
+## Output format
+
+Every log call produces output in the form:
+
+```
+[YYYY-MM-DD HH:MM:SS.mmm] your message here
+```
+
+The timestamp uses `clock_gettime(CLOCK_REALTIME)` for nanosecond resolution, truncated to milliseconds. The timezone is the device's local timezone via `localtime_r`. All output goes to **standard output (stdout)**.
+
+**Example output:**
+
+```
+[2025-10-27 14:23:45.123] Server started on port 8080
+[2025-10-27 14:23:45.456] Connection failed: Connection refused
+[2025-10-27 14:23:45.789] Received 1024 bytes from client
+[2025-10-27 14:23:46.012] Buffer usage at 85%
+```
+
+## Functions
+
+### `log_info()`
+
+Use for normal operational events: successful connections, completed operations, status transitions.
+
+**Signature:**
+
+```c
+void log_info(const char *fmt, ...);
+```
+
+<ParamField path="fmt" type="const char *">
+  A printf-compatible format string.
+</ParamField>
+
+<ParamField path="..." type="variadic">
+  Arguments matching the format string specifiers.
+</ParamField>
+
+**Examples:**
+
+```c
+log_info("Audio client initialized\n");
+log_info("Connected to server: %s:%d\n", host, port);
+log_info("Processed %d frames in %ld ms\n", frame_count, elapsed_ms);
+```
+
+---
+
+### `log_error()`
+
+Use when an operation fails and the failure is significant — connection errors, allocation failures, unexpected return codes.
+
+**Signature:**
+
+```c
+void log_error(const char *fmt, ...);
+```
+
+<ParamField path="fmt" type="const char *">
+  A printf-compatible format string.
+</ParamField>
+
+<ParamField path="..." type="variadic">
+  Arguments matching the format string specifiers.
+</ParamField>
+
+**Examples:**
+
+```c
+log_error("File open failed: %s\n", strerror(errno));
+log_error("Memory allocation failed, needed %zu bytes\n", required);
+log_error("ai_core_capture returned error: %s\n", ai_core_get_error_string(result));
+```
+
+---
+
+### `log_debug()`
+
+Use during development for verbose tracing: data received, internal state, timing measurements. Remove or reduce these calls in production builds where output volume matters.
+
+**Signature:**
+
+```c
+void log_debug(const char *fmt, ...);
+```
+
+<ParamField path="fmt" type="const char *">
+  A printf-compatible format string.
+</ParamField>
+
+<ParamField path="..." type="variadic">
+  Arguments matching the format string specifiers.
+</ParamField>
+
+**Examples:**
+
+```c
+log_debug("Received message: type=%d, length=%d\n", msg_type, msg_len);
+log_debug("State transition: %d -> %d\n", old_state, new_state);
+log_debug("Round-trip latency: %ld ms\n", latency_ms);
+```
+
+---
+
+### `log_warn()`
+
+Use for unexpected but non-fatal conditions: degraded performance, missing optional config, retries, near-capacity thresholds.
+
+**Signature:**
+
+```c
+void log_warn(const char *fmt, ...);
+```
+
+<ParamField path="fmt" type="const char *">
+  A printf-compatible format string.
+</ParamField>
+
+<ParamField path="..." type="variadic">
+  Arguments matching the format string specifiers.
+</ParamField>
+
+**Examples:**
+
+```c
+log_warn("Buffer usage high: %d%%\n", usage_pct);
+log_warn("Config file not found, using defaults\n");
+log_warn("Capture timeout after %d ms, retrying\n", timeout_ms);
+```
+
+## Usage guidance
+
+| Situation | Function |
+|---|---|
+| Successful operations and status | `log_info()` |
+| Errors and failures | `log_error()` |
+| Verbose tracing during development | `log_debug()` |
+| Non-fatal anomalies and warnings | `log_warn()` |
+
+## Complete example
+
+```c
+#include "ai_log.h"
+#include "ai_audio.h"
+#include <errno.h>
+#include <string.h>
+
+int main(void) {
+    log_info("=== Audio client starting ===\n");
+
+    ai_audio_t *client = ai_audio_init(NULL);
+    if (!client) {
+        log_error("Failed to initialize audio client\n");
+        return 1;
+    }
+    log_info("Audio client initialized\n");
+
+    log_debug("Attempting playback of /data/beep.pcm\n");
+    int ret = ai_audio_play_simple(client, "/data/beep.pcm");
+    if (ret != 0) {
+        log_error("Playback failed: %s\n", ai_audio_get_error_string(ret));
+        ai_audio_cleanup(client);
+        return 1;
+    }
+    log_info("Playback started successfully\n");
+
+    ai_audio_cleanup(client);
+    log_info("=== Audio client stopped ===\n");
+    return 0;
+}
+```
+
+**Output:**
+
+```
+[2025-10-27 14:23:45.001] === Audio client starting ===
+[2025-10-27 14:23:45.015] Audio client initialized
+[2025-10-27 14:23:45.016] Attempting playback of /data/beep.pcm
+[2025-10-27 14:23:45.080] Playback started successfully
+[2025-10-27 14:23:45.081] === Audio client stopped ===
+```
+
+## Thread safety
+
+`vprintf()` is thread-safe on the target platform. Multiple threads can call log functions concurrently without crashing. However, output lines from simultaneous calls may interleave — this is expected behavior for any `printf`-based logging system.
+
+## Saving logs to a file
+
+All output goes to stdout. Redirect at the shell to persist logs:
+
+```bash
+./my_app > /data/app.log 2>&1
+```
+
+## Include and link
+
+```c
+#include "ai_log.h"
+```
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_app my_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+```
+
+The log functions are already compiled into `libai_glass_sdk.a` and `libai_glass_sdk.so`. No additional library flags are needed.

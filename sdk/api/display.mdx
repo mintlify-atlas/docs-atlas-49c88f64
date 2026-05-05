@@ -1,0 +1,372 @@
+---
+title: "Display Client API: framebuffer rendering reference"
+description: "Write pixels to the AI Smart Glasses monocular display via shared memory. Manage dual-slot rendering and multi-client focus for the 640×480 30° FOV panel."
+---
+
+The Display Client API lets your application render to the AI Smart Glasses' built-in monocular display. Rather than sending pixel data over a socket, the implementation maps a shared memory region directly into your process. You write pixels into the framebuffer, then call `ai_display_commit_frame()` to notify `ai_display_service` to push the new frame to the screen. The display is 640×480 pixels with a 30° field of view. The shared memory provides two buffer slots: slot 0 for full-screen application rendering and slot 1 for an overlay layer.
+
+<Note>
+  The `ai_display_service` must be running before you call `ai_display_connect()`. The service is part of the `DisplayVersion` firmware.
+</Note>
+
+## Display specifications
+
+| Property | Value |
+|---|---|
+| Resolution | 640 × 480 pixels |
+| Field of view | 30° monocular |
+| Framebuffer format | 4 BPP (bits per pixel) |
+| Frame size | 153,600 bytes (`AI_DISPLAY_FRAME_SIZE`) |
+| Slot 0 | Main application display |
+| Slot 1 | Overlay / notification layer |
+
+## Types
+
+### `ai_display_client_t`
+
+Opaque handle returned by `ai_display_init()`. Represents one client's connection to the display service.
+
+### Key constants
+
+```c
+#define AI_DISPLAY_WIDTH      640
+#define AI_DISPLAY_HEIGHT     480
+#define AI_DISPLAY_BPP        4
+#define AI_DISPLAY_FRAME_SIZE (AI_DISPLAY_WIDTH * AI_DISPLAY_HEIGHT / 2)  /* 153600 bytes */
+```
+
+### Error codes
+
+```c
+#define AI_DISPLAY_SUCCESS           0   /* Success */
+#define AI_DISPLAY_ERROR_INIT       -1   /* Initialization failed */
+#define AI_DISPLAY_ERROR_CONNECT    -2   /* Could not connect to service */
+#define AI_DISPLAY_ERROR_SHM        -3   /* Shared memory operation failed */
+#define AI_DISPLAY_ERROR_SOCKET     -4   /* Socket operation failed */
+#define AI_DISPLAY_ERROR_SEND       -5   /* Send failed */
+#define AI_DISPLAY_ERROR_PARAM      -6   /* Invalid parameter */
+#define AI_DISPLAY_ERROR_NOT_READY  -7   /* Client not connected */
+```
+
+## Functions
+
+### `ai_display_init()`
+
+Allocates and initializes a display client handle. Does not open any connections.
+
+**Signature:**
+
+```c
+ai_display_client_t* ai_display_init(void);
+```
+
+**Returns:** A client handle on success, `NULL` on allocation failure. Always pair with `ai_display_cleanup()`.
+
+---
+
+### `ai_display_connect()`
+
+Opens the shared memory region and establishes the Unix socket connection to the display service.
+
+**Signature:**
+
+```c
+int ai_display_connect(ai_display_client_t *client);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  Handle returned by `ai_display_init()`.
+</ParamField>
+
+**Returns:** `AI_DISPLAY_SUCCESS` (0) on success, or a negative error code if the service is not reachable or the shared memory cannot be mapped.
+
+---
+
+### `ai_display_get_framebuffer()`
+
+Returns a pointer to the primary framebuffer (slot 0). Write your pixel data here, then call `ai_display_commit_frame()` to push it to the screen.
+
+**Signature:**
+
+```c
+uint8_t* ai_display_get_framebuffer(ai_display_client_t *client);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  A connected client handle.
+</ParamField>
+
+**Returns:** Pointer to `AI_DISPLAY_FRAME_SIZE` bytes of writable framebuffer memory, or `NULL` if the client is not connected.
+
+---
+
+### `ai_display_get_framebuffer_slot()`
+
+Returns a pointer to the framebuffer for a specific slot. Use slot 0 for full-screen rendering and slot 1 for overlays or notifications that sit on top of the main display content.
+
+**Signature:**
+
+```c
+uint8_t* ai_display_get_framebuffer_slot(ai_display_client_t *client, int slot);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  A connected client handle.
+</ParamField>
+
+<ParamField path="slot" type="int">
+  `0` for the primary display buffer, `1` for the overlay buffer.
+</ParamField>
+
+**Returns:** Pointer to the slot's framebuffer, or `NULL` on error.
+
+---
+
+### `ai_display_commit_frame()`
+
+Signals the display service to read the current framebuffer contents and push them to the screen. Write all your pixels before calling this function.
+
+**Signature:**
+
+```c
+int ai_display_commit_frame(
+    ai_display_client_t *client,
+    int slot_index,
+    int x, int y, int w, int h
+);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  A connected client handle.
+</ParamField>
+
+<ParamField path="slot_index" type="int">
+  Slot to commit: `0` for main, `1` for overlay.
+</ParamField>
+
+<ParamField path="x" type="int">
+  Reserved. Pass `0`.
+</ParamField>
+
+<ParamField path="y" type="int">
+  Reserved. Pass `0`.
+</ParamField>
+
+<ParamField path="w" type="int">
+  Reserved. Pass `AI_DISPLAY_WIDTH`.
+</ParamField>
+
+<ParamField path="h" type="int">
+  Reserved. Pass `AI_DISPLAY_HEIGHT`.
+</ParamField>
+
+**Returns:** `AI_DISPLAY_SUCCESS` (0) on success, or a negative error code.
+
+<Note>
+  The `x`, `y`, `w`, and `h` parameters are reserved for future partial-update support. Pass the full display dimensions until partial updates are documented.
+</Note>
+
+---
+
+### `ai_display_request_focus()`
+
+In a multi-client scenario, requests that this client become the active (foreground) renderer. Only the client whose PID matches `active_client_pid` in the shared memory has its frames displayed.
+
+**Signature:**
+
+```c
+int ai_display_request_focus(ai_display_client_t *client);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  A connected client handle.
+</ParamField>
+
+**Returns:** `AI_DISPLAY_SUCCESS` (0) on success, or a negative error code.
+
+<Tip>
+  Call `ai_display_request_focus()` when your application transitions to the foreground. If your app is the only client, you still need to call it at least once before the service will display your frames.
+</Tip>
+
+---
+
+### `ai_display_disconnect()`
+
+Closes the socket connection and unmaps shared memory without destroying the handle. You can call `ai_display_connect()` again afterward.
+
+**Signature:**
+
+```c
+void ai_display_disconnect(ai_display_client_t *client);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  A connected client handle.
+</ParamField>
+
+---
+
+### `ai_display_cleanup()`
+
+Disconnects if still connected, then frees the client handle. Always call this when your application is done with the display.
+
+**Signature:**
+
+```c
+void ai_display_cleanup(ai_display_client_t *client);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  Handle to destroy. Do not use after this call.
+</ParamField>
+
+---
+
+### `ai_display_is_connected()`
+
+Returns the connection state of the client without making a network call.
+
+**Signature:**
+
+```c
+int ai_display_is_connected(ai_display_client_t *client);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  Any client handle, including `NULL` (returns `0` safely).
+</ParamField>
+
+**Returns:** `1` if connected, `0` otherwise.
+
+---
+
+### `ai_display_get_error_string()`
+
+Converts an error code into a human-readable description.
+
+**Signature:**
+
+```c
+const char* ai_display_get_error_string(int error_code);
+```
+
+<ParamField path="error_code" type="int">
+  One of the `AI_DISPLAY_ERROR_*` constants.
+</ParamField>
+
+**Returns:** A static, null-terminated string. Do not free or modify it.
+
+### `ai_display_set_power_save_timeout()`
+
+Sets the screen auto-off timeout. When the timeout elapses without a frame commit, the display service turns off the screen. Setting the timeout to `0` disables auto-off and immediately wakes the screen if it is already off.
+
+**Signature:**
+
+```c
+int ai_display_set_power_save_timeout(ai_display_client_t *client, int timeout_sec);
+```
+
+<ParamField path="client" type="ai_display_client_t *">
+  A connected client handle.
+</ParamField>
+
+<ParamField path="timeout_sec" type="int">
+  Seconds before the screen turns off. `0` disables the timeout and wakes the screen immediately.
+</ParamField>
+
+**Returns:** `AI_DISPLAY_SUCCESS` (0) on success, or a negative error code.
+
+<Tip>
+  The default firmware sets a 30-second auto-off. Call `ai_display_set_power_save_timeout(client, 0)` to disable it while your application is actively rendering, and restore it when your app moves to the background.
+</Tip>
+
+---
+
+## Dual-slot rendering
+
+The framebuffer shared memory contains two slots of equal size. The display service composites them before sending to the panel:
+
+<CardGroup cols={2}>
+  <Card title="Slot 0 — main display" icon="display">
+    Full-screen application content. Most apps write all pixels here and commit slot 0.
+  </Card>
+  <Card title="Slot 1 — overlay" icon="layer-group">
+    Notifications, HUD elements, or status indicators layered on top of the main content. A separate process can own this slot while your app owns slot 0.
+  </Card>
+</CardGroup>
+
+## Complete example
+
+The following program initializes the client, fills the framebuffer with black, commits one frame, and cleans up:
+
+```c
+#include "ai_display.h"
+#include <string.h>
+#include <stdio.h>
+
+int main(void) {
+    /* 1. Initialize */
+    ai_display_client_t *client = ai_display_init();
+    if (!client) {
+        fprintf(stderr, "Failed to initialize display client\n");
+        return 1;
+    }
+
+    /* 2. Connect to the display service */
+    int ret = ai_display_connect(client);
+    if (ret != AI_DISPLAY_SUCCESS) {
+        fprintf(stderr, "Connect failed: %s\n", ai_display_get_error_string(ret));
+        ai_display_cleanup(client);
+        return 1;
+    }
+
+    /* 3. Request focus so the service renders our frames */
+    ai_display_request_focus(client);
+
+    /* 4. Get the primary framebuffer and write pixels */
+    uint8_t *fb = ai_display_get_framebuffer(client);
+    if (!fb) {
+        fprintf(stderr, "Failed to get framebuffer\n");
+        ai_display_cleanup(client);
+        return 1;
+    }
+
+    /* Fill with black (all zeros) */
+    memset(fb, 0, AI_DISPLAY_FRAME_SIZE);
+
+    /* 5. Commit the frame to the screen */
+    ret = ai_display_commit_frame(client, 0, 0, 0, AI_DISPLAY_WIDTH, AI_DISPLAY_HEIGHT);
+    if (ret != AI_DISPLAY_SUCCESS) {
+        fprintf(stderr, "Commit failed: %s\n", ai_display_get_error_string(ret));
+    }
+
+    /* 6. Cleanup */
+    ai_display_cleanup(client);
+    return 0;
+}
+```
+
+## Writing overlay content
+
+```c
+/* Get the overlay slot */
+uint8_t *overlay = ai_display_get_framebuffer_slot(client, 1);
+if (overlay) {
+    /* Write overlay pixels... */
+    memset(overlay, 0xFF, AI_DISPLAY_FRAME_SIZE); /* White overlay example */
+
+    /* Commit the overlay slot */
+    ai_display_commit_frame(client, 1, 0, 0, AI_DISPLAY_WIDTH, AI_DISPLAY_HEIGHT);
+}
+```
+
+## Compile command
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_display_app my_display_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lrt
+```

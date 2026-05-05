@@ -1,0 +1,117 @@
+---
+title: "Hardware Overview: Specs, Display, and Connectivity"
+description: "AI Smart Glasses hardware specs: RV1106B SoC, 1080P camera, optional 640×480 display, WiFi/BT connectivity, 180mAh battery, and v0.6.x firmware compatibility notes."
+---
+
+AI Smart Glasses is built around a Rockchip RV1106B SoC in a 43g form factor that integrates a 1080P camera, microphone, speaker, WiFi, Bluetooth, and an optional monocular display. This page covers every hardware component, the two firmware variants, and the compatibility requirements for v0.6.x firmware. 3D models of the reference hardware are available in the repository under `hardware/3d_models/` if you want to print your own frame or adapt the design.
+
+## SoC and compute
+
+| Component | Specification |
+|-----------|---------------|
+| SoC | Rockchip RV1106B |
+| CPU | Single ARM Cortex-A7 |
+| Storage | 8GB eMMC |
+| OS | Embedded Linux |
+
+The RV1106B runs a single ARM Cortex-A7 core. There is no multi-core parallelism — design your application accordingly. Heavy compute workloads such as vision inference should be offloaded to a cloud endpoint or a companion device.
+
+## Display
+
+| Component | Specification |
+|-----------|---------------|
+| Module | JBD monocular display |
+| Resolution | 640×480 |
+| Field of view | 30° |
+| Availability | Optional (DisplayVersion only) |
+
+The display is monocular and optional. Starting from firmware v0.6.5, two variants are released:
+
+- **`Firmware_RV1106B_RK962_IMX219.DisplayVersion.img`** — includes the display service and `launcher-app`
+- **`Firmware_RV1106B_RK962_IMX219.AudioVersion.img`** — no display startup, lower power draw
+
+Choose the variant that matches your hardware. If you build from source, use `./build.sh` for the display variant or `./build.sh --without-display` for the audio variant.
+
+## Camera
+
+| Component | Specification |
+|-----------|---------------|
+| Sensor | Sony IMX219 |
+| Resolution | 1080P (1920×1080) |
+| Mounting | Rotated 90° in reference hardware |
+
+<Note>
+  The camera is physically mounted rotated 90° in the current reference hardware design. Images captured by the device will be rotated relative to the scene. Add orientation preprocessing (rotate 90° or 270° depending on orientation) in your cloud-side or host-side pipeline before passing frames to downstream vision models or displays.
+</Note>
+
+## Audio
+
+| Component | Specification |
+|-----------|---------------|
+| Input | Integrated microphone |
+| Output | Integrated speaker |
+| SDK support | PCM playback, recording control, TTS |
+
+The audio system supports simultaneous microphone input and speaker output. The SDK provides recording control, PCM playback, and resource arbitration with the `ai-core` service when it is running.
+
+## Connectivity
+
+| Interface | Specification |
+|-----------|---------------|
+| WiFi | 802.11b/g/n (2.4GHz only) |
+| Bluetooth | Bluetooth 5.3 |
+| Bluetooth device name | OSAIG |
+| USB | USB 2.0 |
+
+<Warning>
+  Only **2.4GHz WiFi** is supported. 5GHz and 5G networks will not connect. When configuring WiFi provisioning or scanning QR codes to join a network, ensure the target network is a 2.4GHz band.
+</Warning>
+
+WiFi provisioning uses an Android app to generate a QR code, which the glasses camera scans to join the network. The device enters network configuration mode automatically on boot, or you can trigger it manually by pressing the button 10 times in quick succession.
+
+Bluetooth is enabled from firmware v0.6.3 onward. Note that Xiaomi phones have known Bluetooth compatibility issues with this firmware.
+
+## Battery and weight
+
+| Property | Value |
+|----------|-------|
+| Battery capacity | 180mAh |
+| Music playback | ~2 hours |
+| Display-on use | ~3 hours |
+| Continuous recording | ~45 minutes |
+| Total weight | 43g |
+
+## Hardware compatibility
+
+<Warning>
+  Firmware **v0.6.x** (including v0.6.5) is **only compatible with integrated hardware produced after January 1, 2026**. If your official kit or reference hardware was manufactured before this date, use firmware v0.6.0 or an earlier release. Flashing v0.6.x firmware on older hardware may result in unexpected behavior.
+</Warning>
+
+The v0.6.1 release notes formally document this compatibility boundary. Check your hardware production date before selecting a firmware version.
+
+## 3D models
+
+Reference 3D models for the glasses frame, temple, and cable routing are available in the repository at `hardware/3d_models/`. These are suitable for 3D printing a custom frame or adapting the physical design for different optics or peripheral layouts.
+
+## Summary
+
+<CardGroup cols={2}>
+  <Card title="SoC" icon="microchip">
+    Rockchip RV1106B, single ARM Cortex-A7, 8GB eMMC storage.
+  </Card>
+  <Card title="Camera" icon="camera">
+    Sony IMX219, 1080P, mounted rotated 90° — apply orientation preprocessing.
+  </Card>
+  <Card title="Display (optional)" icon="display">
+    JBD monocular, 640×480, 30° FOV. Available in DisplayVersion firmware.
+  </Card>
+  <Card title="Connectivity" icon="wifi">
+    WiFi 802.11b/g/n (2.4GHz only), Bluetooth 5.3 (OSAIG), USB 2.0.
+  </Card>
+  <Card title="Audio" icon="volume-high">
+    Integrated microphone and speaker with PCM and TTS SDK support.
+  </Card>
+  <Card title="Battery" icon="battery-half">
+    180mAh — ~2hr music, ~3hr display, ~45min recording. Total weight: 43g.
+  </Card>
+</CardGroup>

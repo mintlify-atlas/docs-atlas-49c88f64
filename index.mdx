@@ -1,133 +1,69 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "AI Smart Glasses: Open-source Linux smart glasses platform"
+description: "Build applications for AI-powered smart glasses on Rockchip RV1106B. Access camera, GPIO, audio, and display through a C SDK with full source code."
 ---
 
-## Setting up
+AI Smart Glasses is an open-source, Linux-based smart glasses platform designed for developers building medical, industrial, educational, and consumer AR applications. The platform runs on a Rockchip RV1106B (ARM Cortex-A7) SoC and exposes hardware capabilities — camera, GPIO, audio, and display — through a clean C SDK backed by prebuilt libraries.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Set up your development environment and build your first application in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Hardware overview" icon="glasses" href="/hardware-overview">
+    Understand the hardware specs, display options, and peripheral layout.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="SDK installation" icon="box" href="/sdk/installation">
+    Add the AI Glass SDK to your project and link against the prebuilt libraries.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API reference" icon="code" href="/sdk/api/gpio">
+    Full reference for GPIO, camera, audio, display, and text event APIs.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Get started
 
-Everything you need to create world-class documentation.
+<Steps>
+  <Step title="Set up your development environment">
+    Clone the [AIGLASS_DEV_ENV](https://github.com/makevary/AIGLASS_DEV_ENV) workspace and run `./setup_build_env.sh` to install the ARM cross-compilation toolchain and all build dependencies on Ubuntu/Debian.
+  </Step>
+  <Step title="Build or flash firmware">
+    Run `./build.sh` to compile firmware for your device. If you have the official kit, it ships with factory firmware ready to use — flashing is only needed when you modify the firmware.
+  </Step>
+  <Step title="Write your first application">
+    Use the [C SDK](/sdk/introduction) to subscribe to GPIO events, capture images, play audio, or render to the display. Cross-compile with the ARM toolchain and push your binary via ADB.
+  </Step>
+  <Step title="Deploy and iterate">
+    Push your binary with `adb push`, run it on the device, and inspect logs live. The host-side workflow lets you edit, compile, and deploy in seconds.
+  </Step>
+</Steps>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## What you can build
 
-## Make your content agent ready
-
-Make your docs work for humans and AI agents alike.
-
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
+<CardGroup cols={3}>
+  <Card title="Medical AR" icon="stethoscope" href="/introduction">
+    Display patient data, vital signs, and medication alerts hands-free during clinical workflows.
   </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
+  <Card title="Industrial guidance" icon="industry" href="/introduction">
+    Real-time AR annotations, equipment recognition, and step-by-step maintenance guidance.
   </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
+  <Card title="AI conversation" icon="microphone" href="/architecture/ai-core-service">
+    Voice-triggered AI conversations using the built-in microphone and speaker.
   </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Key capabilities
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={2}>
+  <Card title="Zero-copy camera access" icon="camera" href="/sdk/api/camera">
+    Retrieve 1080P JPEG or NV12 frames via shared memory without copying data.
+  </Card>
+  <Card title="GPIO event subscription" icon="bolt" href="/sdk/api/gpio">
+    Low-latency (&lt;13 ms) async button event callbacks across up to 64 clients.
+  </Card>
+  <Card title="Audio playback and recording" icon="volume-high" href="/sdk/api/audio">
+    PCM playback, recording control, and resource arbitration with AI Core.
+  </Card>
+  <Card title="Display service" icon="display" href="/sdk/api/display">
+    Framebuffer rendering to a 640x480 monocular display with multi-client focus management.
+  </Card>
+</CardGroup>

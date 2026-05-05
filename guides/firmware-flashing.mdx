@@ -1,0 +1,181 @@
+---
+title: "Flash firmware to AI Smart Glasses with SocToolKit"
+description: "Use SocToolKit to write a compiled update.img to AI Smart Glasses via USB loader mode, covering both ADB and hardware button entry methods."
+---
+
+Flashing replaces the firmware image on the device's storage. You only need to do this when you have compiled new firmware and want to test it, need to upgrade to a newer release, or are recovering a device with a damaged system. Brand-new devices from the official kit ship with factory firmware already installed and are ready to use without flashing.
+
+<Warning>
+  **Hardware compatibility**: The v0.6.x firmware is only compatible with integrated hardware produced **after January 1, 2026**. If your device was manufactured before that date, use firmware v0.6.0 or earlier.
+</Warning>
+
+## When to flash
+
+| Situation | Flash required? |
+|---|---|
+| Brand new device from the official kit | No — use it directly |
+| You modified firmware code and want to test it | Yes |
+| Upgrading to a newer firmware release | Yes |
+| Recovering a device with a damaged system | Yes |
+| Only developing user-level apps via ADB | No |
+
+## Prerequisites
+
+- AI Smart Glasses device and a USB data cable
+- Compiled `update.img` (see [environment setup](/guides/environment-setup))
+- SocToolKit — located in the `tools/` directory of the project repository
+- ADB installed on your host (needed for Method 1 loader entry)
+
+## Flashing steps
+
+<Steps>
+  <Step title="Start SocToolKit">
+    Launch the SocToolKit tool for your operating system:
+
+    <Tabs>
+      <Tab title="Windows">
+        ```bash
+        tools/Windows/SocToolKit/SocToolKit.exe
+        ```
+      </Tab>
+      <Tab title="Linux">
+        ```bash
+        tools/Linux/SocToolKit/SocToolKit
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Select the chip model">
+    In the SocToolKit interface, find the chip selection dropdown and choose **RV1106B**.
+  </Step>
+
+  <Step title="Connect the device">
+    Plug the USB data cable into the device and your host machine. Wait about 10 seconds for the system to recognize the connection.
+  </Step>
+
+  <Step title="Enter loader mode">
+    The device must be in loader (flashing) mode before SocToolKit can write to it. Use whichever method fits your situation:
+
+    **Method 1 — via ADB (device is booted and ADB is available):**
+
+    ```bash
+    adb shell
+    ```
+
+    Once you see the device shell prompt, run:
+
+    ```bash
+    reboot loader
+    ```
+
+    Wait a few seconds. The device will restart into loader mode.
+
+    <Note>
+      If `reboot loader` does not trigger a restart, check for a stuck process. On the host, run `adb shell top` and look for any process name starting with `{`. Note its PID and kill it with `adb shell kill -9 <PID>`, then retry `reboot loader`. A stuck boot script is the most common cause of this failure.
+    </Note>
+
+    **Method 2 — via the hardware flash button (use when ADB is unavailable):**
+
+    1. Set the power switch to off and disconnect the USB cable.
+    2. Locate the small round hole on the temple — the flash button is inside it.
+    3. Press and hold the flash button with a non-metal pointed tool (a toothpick works well).
+    4. While holding the button, plug in the USB cable.
+    5. Release the button once SocToolKit detects the device.
+  </Step>
+
+  <Step title="Confirm device detection">
+    In the SocToolKit interface, check the **USB Device** area. The device should appear in the list. If it does not appear, see the troubleshooting section below.
+  </Step>
+
+  <Step title="Select the firmware file">
+    Click **Firmware...** in SocToolKit, navigate to the `output/image/` directory of your `AIGLASS_DEV_ENV` workspace, and select `update.img`.
+  </Step>
+
+  <Step title="Flash the firmware">
+    Click **Upgrade** to begin flashing. During the process:
+
+    - Keep the USB connection stable
+    - Do not disconnect power from the device
+    - Do not close SocToolKit
+
+    When the progress bar reaches 100%, SocToolKit will report success and the device will restart automatically.
+  </Step>
+
+  <Step title="Wait for the device to boot">
+    Allow up to 10 seconds for the device to complete its first boot after flashing. Proceed to verify the result.
+  </Step>
+</Steps>
+
+## Verify the flash
+
+**Via ADB:**
+
+```bash
+adb shell
+uname -a
+```
+
+A successful response confirms the device is running and ADB is connected.
+
+**Via device functions:** check that the display, camera, and audio behave normally, then complete the WiFi provisioning check described below.
+
+## First-time WiFi provisioning after flashing
+
+After flashing, the device has no stored WiFi credentials and will enter provisioning mode on first boot. Follow the steps in [WiFi provisioning](/guides/wifi-provisioning) to connect to your network.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="ADB cannot connect to the device">
+    ```bash
+    # Check whether the device is listed
+    adb devices
+
+    # If not listed, restart the ADB server
+    adb kill-server
+    adb start-server
+    adb devices
+    ```
+
+    Also confirm that the USB cable supports data transfer (not charge-only) and that you have accepted the ADB authorization dialog on the device.
+  </Accordion>
+
+  <Accordion title="Device not entering loader mode">
+    If `reboot loader` runs but nothing happens:
+
+    1. Check for a stuck process with `adb shell top`. Kill any process whose name starts with `{` using `adb shell kill -9 <PID>`, then retry.
+    2. If the device cannot boot at all, switch to Method 2 (hardware flash button).
+    3. Try a different USB port or cable.
+    4. Wait up to 30 seconds — loader mode can take time to register.
+  </Accordion>
+
+  <Accordion title="SocToolKit does not recognize the device">
+    - Confirm **RV1106B** is selected as the chip model.
+    - **Windows**: verify the Rockchip USB driver is installed. Check Device Manager and reinstall the driver if the device shows a warning icon. Try running SocToolKit as administrator.
+    - **Linux**: check USB device permissions.
+
+      ```bash
+      # List connected USB devices
+      lsusb
+
+      # If the device appears but SocToolKit cannot access it, add a udev rule
+      sudo nano /etc/udev/rules.d/99-rockchip.rules
+      ```
+  </Accordion>
+
+  <Accordion title="Flashing interrupted or progress bar stuck">
+    - Check that the USB cable and port are stable.
+    - Verify `update.img` is not corrupted (compare file size against a known-good build).
+    - Ensure the host has sufficient free disk space.
+    - Recompile the firmware and try again.
+  </Accordion>
+
+  <Accordion title="Device does not boot after flashing">
+    Wait at least 2–3 minutes — first boot after flashing can be slow. If it still does not boot:
+
+    - Confirm the firmware variant matches your hardware (AudioVersion vs DisplayVersion).
+    - Re-flash with a verified `update.img`.
+    - Check hardware connections (battery, screen cable).
+  </Accordion>
+</AccordionGroup>

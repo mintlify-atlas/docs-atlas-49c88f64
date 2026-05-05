@@ -1,0 +1,229 @@
+---
+title: "Camera Client API: capture JPEG and NV12 frames"
+description: "Capture JPEG and NV12 frames from the AI Smart Glasses camera via zero-copy shared memory. Multi-client concurrent access with configurable capture timeouts."
+---
+
+The Camera Client API provides a straightforward way to capture single frames from the AI Smart Glasses camera module. Rather than duplicating image data through pipes or sockets, the implementation uses a 4 MB POSIX shared memory region so image bytes travel directly from the `ai-core` camera buffer to your process with no extra copies. Multiple clients can connect and capture simultaneously — resources are created on the first connection and released automatically after the last client disconnects.
+
+<Note>
+  The `ai-core` service must be started with `--enable-camera` before any camera client can connect. Add `--enable-jpeg` to receive JPEG-encoded frames in addition to raw NV12.
+</Note>
+
+## Types
+
+### `ai_core_data_t`
+
+Contains all fields describing a captured frame. The `data` pointer references memory allocated by the SDK; you must call `ai_core_free_data()` when finished.
+
+```c
+typedef struct {
+    uint8_t *data;    /* Frame data pointer */
+    size_t   size;    /* Data size in bytes */
+    int      width;   /* Frame width in pixels */
+    int      height;  /* Frame height in pixels */
+    int      format;  /* AI_MEDIA_FORMAT_JPEG or AI_MEDIA_FORMAT_NV12 */
+    int      sequence;/* Monotonically increasing frame counter */
+} ai_core_data_t;
+```
+
+### Image format constants
+
+```c
+#define AI_MEDIA_FORMAT_JPEG  0  /* Compressed JPEG */
+#define AI_MEDIA_FORMAT_NV12  1  /* Raw YUV420sp, 1.5 bytes per pixel */
+```
+
+**JPEG** produces a compressed bitstream suitable for saving directly to disk or transmitting over a network. **NV12** (YUV420 semi-planar) delivers uncompressed luma and chroma planes at 1.5 bytes per pixel — useful when you need pixel-level access or plan to feed frames into a vision pipeline without a decode step.
+
+### `ai_core_client_t`
+
+An opaque handle returned by `ai_core_init()`. You do not allocate or inspect this struct directly.
+
+### Error codes
+
+```c
+#define AI_MEDIA_SUCCESS          0   /* Operation succeeded */
+#define AI_MEDIA_ERROR_INIT      -1   /* Initialization or connection failed */
+#define AI_MEDIA_ERROR_TIMEOUT   -2   /* Capture timed out */
+#define AI_MEDIA_ERROR_CAPTURE   -3   /* Camera or service error during capture */
+#define AI_MEDIA_ERROR_MEMORY    -4   /* Memory allocation failed */
+```
+
+## Functions
+
+### `ai_core_init()`
+
+Creates a client handle and connects to the `ai-core` camera service. The implementation retries the connection up to three times before returning `NULL`.
+
+**Signature:**
+
+```c
+ai_core_client_t* ai_core_init(void);
+```
+
+**Returns:** A valid client handle on success, `NULL` on failure.
+
+<Warning>
+  If `ai-core` is not running or was not started with `--enable-camera`, `ai_core_init()` returns `NULL`. Check `ps aux | grep ai-core` and the socket path `/tmp/ai-core_camera_ctrl` if connection fails.
+</Warning>
+
+---
+
+### `ai_core_capture()`
+
+Requests one frame from the camera service and fills `data` with the result. The function blocks until a frame is available or the timeout elapses.
+
+**Signature:**
+
+```c
+int ai_core_capture(ai_core_client_t *client, ai_core_data_t *data, int timeout_ms);
+```
+
+<ParamField path="client" type="ai_core_client_t *">
+  Handle returned by `ai_core_init()`.
+</ParamField>
+
+<ParamField path="data" type="ai_core_data_t *">
+  Output struct. The SDK allocates `data->data`; call `ai_core_free_data()` when done.
+</ParamField>
+
+<ParamField path="timeout_ms" type="int">
+  Maximum milliseconds to wait. Pass `0` to wait indefinitely.
+</ParamField>
+
+**Returns:** `AI_MEDIA_SUCCESS` (0) on success, or a negative error code.
+
+<Warning>
+  Every successful call to `ai_core_capture()` allocates memory. You **must** call `ai_core_free_data()` on `data` after processing to avoid leaks.
+</Warning>
+
+---
+
+### `ai_core_free_data()`
+
+Releases the memory allocated by `ai_core_capture()` and sets `data->data` to `NULL`.
+
+**Signature:**
+
+```c
+void ai_core_free_data(ai_core_data_t *data);
+```
+
+<ParamField path="data" type="ai_core_data_t *">
+  The struct filled by a previous call to `ai_core_capture()`.
+</ParamField>
+
+---
+
+### `ai_core_cleanup()`
+
+Disconnects from the camera service and frees the client handle. After this call the handle is invalid.
+
+**Signature:**
+
+```c
+void ai_core_cleanup(ai_core_client_t *client);
+```
+
+<ParamField path="client" type="ai_core_client_t *">
+  Handle to destroy. Do not use after this call.
+</ParamField>
+
+---
+
+### `ai_core_get_error_string()`
+
+Converts a numeric error code into a human-readable string for logging and debugging.
+
+**Signature:**
+
+```c
+const char* ai_core_get_error_string(int error_code);
+```
+
+<ParamField path="error_code" type="int">
+  One of the `AI_MEDIA_ERROR_*` constants returned by an API function.
+</ParamField>
+
+**Returns:** A static string describing the error. Do not free or modify it.
+
+## Shared memory
+
+The camera service and all clients share a single `4 MB + 1 KB` POSIX shared memory region named `/ai-core_shm`. The service writes frames into this region and signals clients via the control socket at `/tmp/ai-core_camera_ctrl`. Because the image bytes are never copied between processes, `ai_core_capture()` achieves near-zero overhead for the data transfer itself — the primary cost is the round-trip to the control socket and any JPEG encoding on the service side.
+
+## Multi-client behavior
+
+Several processes can call `ai_core_init()` and `ai_core_capture()` concurrently. The service creates the shared memory region on the first client connection and removes it after the last client calls `ai_core_cleanup()`. Each call to `ai_core_capture()` allocates its own buffer in the calling process, so clients do not interfere with each other's frame data.
+
+## Complete example
+
+The following program initializes a camera client, captures five frames, saves each to disk, and cleans up:
+
+```c
+#include "ai_camera.h"
+#include <stdio.h>
+#include <unistd.h>
+
+int main(int argc, char *argv[]) {
+    const char *save_path = (argc > 1) ? argv[1] : "/tmp";
+
+    /* 1. Initialize client */
+    ai_core_client_t *client = ai_core_init();
+    if (!client) {
+        fprintf(stderr, "Failed to initialize — ensure ai-core --enable-camera is running\n");
+        return 1;
+    }
+
+    /* 2. Capture five frames */
+    for (int i = 0; i < 5; i++) {
+        ai_core_data_t data;
+        int result = ai_core_capture(client, &data, 5000);
+
+        if (result == AI_MEDIA_SUCCESS) {
+            const char *ext = (data.format == AI_MEDIA_FORMAT_JPEG) ? "jpg" : "nv12";
+            char path[256];
+            snprintf(path, sizeof(path), "%s/frame_%03d.%s", save_path, i + 1, ext);
+
+            FILE *fp = fopen(path, "wb");
+            if (fp) {
+                fwrite(data.data, 1, data.size, fp);
+                fclose(fp);
+                printf("Saved %s (%dx%d, %zu bytes)\n",
+                       path, data.width, data.height, data.size);
+            }
+
+            /* 3. Always free after use */
+            ai_core_free_data(&data);
+        } else {
+            fprintf(stderr, "Capture failed: %s\n", ai_core_get_error_string(result));
+        }
+
+        sleep(1);
+    }
+
+    /* 4. Cleanup */
+    ai_core_cleanup(client);
+    return 0;
+}
+```
+
+## Compile command
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_camera_app my_camera_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lrt
+```
+
+## Starting the service
+
+```bash
+# Minimal — NV12 output only
+./ai-core --enable-camera
+
+# Recommended — enables JPEG encoding and 3A (auto-exposure, white balance, focus)
+./ai-core --enable-camera --enable-jpeg --enable-3a
+```

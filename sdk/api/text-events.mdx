@@ -1,0 +1,278 @@
+---
+title: "Text Event Client API: streaming ASR and LLM output"
+description: "Receive streaming ASR speech recognition results and LLM language model responses from ai-core in real time via a non-blocking callback on a dedicated thread."
+---
+
+The Text Event Client API provides a lightweight way to receive text streams produced by `ai-core` in real time. When the user speaks, the on-device ASR (automatic speech recognition) pipeline emits incremental transcription results. When `ai-core` generates a language model response, the LLM pipeline streams tokens as they are produced. Your application receives both through the same callback interface, distinguished by a `source` field. A dedicated receive thread drives all deliveries, so your main loop is never blocked waiting for text.
+
+## Text sources
+
+Text events arrive from three origins:
+
+<CardGroup cols={2}>
+  <Card title="ASR — speech recognition" icon="microphone">
+    Incremental transcription of the user's speech. Partial results stream as the user speaks; a final result arrives when the utterance ends.
+  </Card>
+  <Card title="LLM — language model" icon="brain">
+    Streaming token output from the AI model. Individual tokens arrive as `PARTIAL` events; the complete response is marked `FINAL`.
+  </Card>
+</CardGroup>
+
+## Types
+
+### `ai_text_source_t`
+
+Identifies where a text event originated.
+
+```c
+typedef enum {
+    AI_TEXT_SOURCE_UNKNOWN = 0,
+    AI_TEXT_SOURCE_ASR     = 1,  /* Speech-to-text result */
+    AI_TEXT_SOURCE_LLM     = 2   /* Language model response token */
+} ai_text_source_t;
+```
+
+### `ai_text_type_t`
+
+Indicates whether a text event is an intermediate streaming chunk or the final result.
+
+```c
+typedef enum {
+    AI_TEXT_TYPE_UNKNOWN = 0,
+    AI_TEXT_TYPE_PARTIAL = 1,  /* Intermediate chunk — more to come */
+    AI_TEXT_TYPE_FINAL   = 2   /* Complete, confirmed output */
+} ai_text_type_t;
+```
+
+### `ai_text_event_t`
+
+The event struct delivered to your callback. The `text` field is UTF-8 encoded.
+
+```c
+typedef struct {
+    int    source;  /* ai_text_source_t */
+    int    type;    /* ai_text_type_t */
+    char  *text;    /* Text content (UTF-8, null-terminated) */
+    int    length;  /* Byte length of text */
+} ai_text_event_t;
+```
+
+**Streaming pattern:**
+
+- While ASR is transcribing or the LLM is generating: `type == AI_TEXT_TYPE_PARTIAL`, successive events append or refine the output.
+- When the utterance or generation is complete: `type == AI_TEXT_TYPE_FINAL`, marking the end of this turn.
+
+### `ai_text_event_cb`
+
+The callback function type. It runs on the client's dedicated receive thread.
+
+```c
+typedef void (*ai_text_event_cb)(ai_text_event_t *event, void *user_data);
+```
+
+### `ai_text_event_client_t`
+
+Opaque handle returned by `ai_text_event_client_create()`.
+
+## Functions
+
+The text event client uses a two-step initialization: create the handle first, then configure the callback with `init()`, then start the background thread with `start()`.
+
+### `ai_text_event_client_create()`
+
+Allocates and returns a text event client handle. No callback is registered at this point.
+
+**Signature:**
+
+```c
+ai_text_event_client_t* ai_text_event_client_create(void);
+```
+
+**Returns:** A client handle on success, `NULL` on allocation failure.
+
+---
+
+### `ai_text_event_client_init()`
+
+Registers the event callback and user data pointer on an already-created client handle. Call this before `ai_text_event_client_start()`.
+
+**Signature:**
+
+```c
+int ai_text_event_client_init(
+    ai_text_event_client_t *client,
+    ai_text_event_cb        cb,
+    void                   *user_data
+);
+```
+
+<ParamField path="client" type="ai_text_event_client_t *">
+  Handle returned by `ai_text_event_client_create()`.
+</ParamField>
+
+<ParamField path="cb" type="ai_text_event_cb">
+  Your event handler. Called from the receive thread for every text event. Must not block for extended periods.
+</ParamField>
+
+<ParamField path="user_data" type="void *">
+  Arbitrary pointer passed unchanged to every callback invocation. Pass `NULL` if unused.
+</ParamField>
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_text_event_client_start()`
+
+Connects to the `ai-core` text event socket and starts the background receive thread. After this returns `0`, your callback begins receiving events.
+
+**Signature:**
+
+```c
+int ai_text_event_client_start(ai_text_event_client_t *client);
+```
+
+<ParamField path="client" type="ai_text_event_client_t *">
+  A client configured with `ai_text_event_client_init()`.
+</ParamField>
+
+**Returns:** `0` on success, `-1` if the connection fails. The socket is at `/var/run/ai_text_event.sock` — verify `ai-core` is running if this call fails.
+
+---
+
+### `ai_text_event_client_stop()`
+
+Stops the background receive thread and disconnects from the socket without freeing the handle. You can call `ai_text_event_client_start()` again afterward to reconnect.
+
+**Signature:**
+
+```c
+void ai_text_event_client_stop(ai_text_event_client_t *client);
+```
+
+<ParamField path="client" type="ai_text_event_client_t *">
+  A running client handle.
+</ParamField>
+
+---
+
+### `ai_text_event_client_destroy()`
+
+Stops the receive thread if still running, then frees the client handle.
+
+**Signature:**
+
+```c
+void ai_text_event_client_destroy(ai_text_event_client_t *client);
+```
+
+<ParamField path="client" type="ai_text_event_client_t *">
+  Handle to destroy. Do not use after this call.
+</ParamField>
+
+<Warning>
+  Always call `ai_text_event_client_destroy()` before your program exits. Skipping it may leave the receive thread running or the socket connection open.
+</Warning>
+
+## Threading model
+
+The SDK creates one background thread per client when you call `ai_text_event_client_start()`. All callback invocations occur on that thread. Keep these rules in mind:
+
+- Do not perform blocking I/O or long computations in the callback.
+- If you need to update a UI or process the text in your main thread, copy the event data and post it to a queue or signal your main loop.
+- The `text` pointer in `ai_text_event_t` is valid only for the duration of the callback. Copy it before returning if you need it later.
+
+## Complete example
+
+The following program listens for ASR and LLM text events until interrupted:
+
+```c
+#include "ai_text_event.h"
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+static volatile int g_running = 1;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    g_running = 0;
+}
+
+static void on_text_event(ai_text_event_t *event, void *user_data) {
+    const char *source_str;
+
+    switch (event->source) {
+        case AI_TEXT_SOURCE_ASR: source_str = "ASR"; break;
+        case AI_TEXT_SOURCE_LLM: source_str = "LLM"; break;
+        default:                 source_str = "UNK"; break;
+    }
+
+    const char *type_str = (event->type == AI_TEXT_TYPE_FINAL) ? "FINAL" : "partial";
+    printf("[%s/%s] %s\n", source_str, type_str, event->text);
+    fflush(stdout);
+}
+
+int main(void) {
+    signal(SIGINT,  signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    /* 1. Create client */
+    ai_text_event_client_t *client = ai_text_event_client_create();
+    if (!client) {
+        fprintf(stderr, "Failed to create text event client\n");
+        return 1;
+    }
+
+    /* 2. Register callback */
+    if (ai_text_event_client_init(client, on_text_event, NULL) != 0) {
+        fprintf(stderr, "Failed to init text event client\n");
+        ai_text_event_client_destroy(client);
+        return 1;
+    }
+
+    /* 3. Connect and start the receive thread */
+    if (ai_text_event_client_start(client) != 0) {
+        fprintf(stderr, "Failed to start client — is ai-core running?\n");
+        ai_text_event_client_destroy(client);
+        return 1;
+    }
+
+    printf("Listening for text events. Press Ctrl+C to stop.\n");
+
+    /* 4. Main loop — events arrive in the background */
+    while (g_running) {
+        sleep(1);
+    }
+
+    /* 5. Clean up */
+    ai_text_event_client_destroy(client);
+    return 0;
+}
+```
+
+## Compile command
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_text_client my_text_client.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+```
+
+## Interpreting streaming output
+
+A typical LLM streaming sequence looks like this:
+
+```
+[LLM/partial] The
+[LLM/partial] The weather
+[LLM/partial] The weather today
+[LLM/partial] The weather today is
+[LLM/partial] The weather today is sunny.
+[LLM/FINAL]   The weather today is sunny.
+```
+
+Accumulate `PARTIAL` events in a buffer if you need to render the growing text incrementally. Discard the buffer and commit the final string when `AI_TEXT_TYPE_FINAL` arrives.

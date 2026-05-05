@@ -1,0 +1,129 @@
+---
+title: "Install and build the AI Glass SDK for ARM devices"
+description: "Set up the AIGLASS_DEV_ENV workspace, explore the SDK directory layout, and build example programs with the ARM cross-compilation toolchain."
+---
+
+The AI Glass SDK ships as a release package containing public C headers, prebuilt libraries, and example programs. Because the release does not include a `src/` directory, you do not compile the SDK itself — you build only the example programs (or your own application) against the prebuilt `libai_glass_sdk.a` or `libai_glass_sdk.so`.
+
+<Note>
+  The release package contains `include/`, `lib/`, `examples/`, and `docs/` only. There is no `src/` directory. All examples link against the prebuilt libraries in `lib/` — do not attempt to compile SDK source files directly.
+</Note>
+
+## SDK directory structure
+
+Understanding the layout helps you find headers and libraries when writing your own `Makefile`.
+
+```text
+ai_glass_sdk/
+├── include/                                    # Public C headers
+│   ├── ai_gpio.h                               # GPIO event client API
+│   ├── ai_ipc.h                                # IPC communication API
+│   ├── ai_camera.h                             # Camera client API
+│   ├── ai_audio.h                              # Audio client API
+│   ├── ai_display.h                            # Display client API
+│   ├── ai_text_event.h                         # Text event client API
+│   ├── ai_log.h                                # Log system API
+│   ├── http_client.h                           # HTTP client API
+│   ├── ws_client.h                             # WebSocket client API
+│   └── ai_ble.h                                # BLE client API
+├── lib/
+│   ├── libai_glass_sdk.a                       # Static library (link at build time)
+│   └── libai_glass_sdk.so                      # Shared library (needed at runtime)
+├── examples/
+│   ├── gpio_example/                           # GPIO event subscription
+│   ├── audio_play_example/                     # PCM audio playback
+│   ├── camera_capture_example/                 # Camera frame capture
+│   ├── disable_aicore_physical_actions_example/# Disable AI-Core button actions
+│   ├── record_audio_example/                   # SDK-controlled recording
+│   ├── media_resource_control/                 # Camera/audio resource console
+│   ├── text_event_example/                     # ASR/LLM/System text streams
+│   ├── http_example/                           # HTTP client
+│   └── websocket_example/                      # WebSocket client
+└── docs/                                       # Per-module API documentation
+    ├── GPIO_Client_API.en.md
+    ├── Camera_Client_API.en.md
+    ├── Audio_Client_API.en.md
+    ├── Display_Client_API.en.md
+    ├── Text_Event_Client_API.en.md
+    └── Log_API.en.md
+```
+
+## Prerequisites
+
+You need the AIGLASS_DEV_ENV workspace with the ARM toolchain set up before you can build anything.
+
+<Steps>
+  <Step title="Clone AIGLASS_DEV_ENV">
+    Clone the [AIGLASS_DEV_ENV](https://github.com/makevary/AIGLASS_DEV_ENV) repository and run the environment setup script. This installs the `arm-rockchip831-linux-uclibcgnueabihf-gcc` cross-compilation toolchain and all required build dependencies on Ubuntu or Debian.
+
+    ```bash
+    ./setup_build_env.sh
+    ```
+  </Step>
+  <Step title="Verify the toolchain">
+    Confirm the ARM compiler is on your PATH before building.
+
+    ```bash
+    arm-rockchip831-linux-uclibcgnueabihf-gcc --version
+    ```
+
+    The `Makefile` resolves the toolchain path relative to the workspace root at `tools/linux/toolchain/arm-rockchip831-linux-uclibcgnueabihf/bin`.
+  </Step>
+  <Step title="Build all examples at once">
+    Run `make` from the SDK root to build every example program in a single step. The top-level `Makefile` iterates over all directories under `examples/` that contain a `Makefile`.
+
+    ```bash
+    cd ai_glass_sdk
+    make
+    ```
+
+    Output binaries are placed in each example's `build/` subdirectory (for example, `examples/gpio_example/build/gpio_example`).
+  </Step>
+  <Step title="Build individual examples">
+    If you only need one example, change into its directory and run `make` directly.
+
+    ```bash
+    cd examples/gpio_example && make
+    cd examples/audio_play_example && make
+    cd examples/camera_capture_example && make
+    cd examples/record_audio_example && make
+    cd examples/text_event_example && make
+    cd examples/http_example && make
+    cd examples/websocket_example && make
+    ```
+  </Step>
+  <Step title="Clean build artifacts">
+    To remove all compiled objects and binaries across the SDK and all examples, run:
+
+    ```bash
+    make clean
+    ```
+  </Step>
+</Steps>
+
+## Makefile build targets
+
+The top-level `Makefile` exposes several targets you can use during development.
+
+| Target | Description |
+| --- | --- |
+| `make` / `make all` | Build libraries and all examples |
+| `make examples` | Build only examples (requires prebuilt libraries) |
+| `make clean` | Remove all build artifacts including example binaries |
+| `make install` | Copy headers and libraries to `/usr/local` |
+| `make release` | Build with `-O3 -DNDEBUG` and strip the shared library |
+
+## Version and platform
+
+The SDK targets the RK1106B/RV1103B platform. Check the `VERSION` file in the SDK root for the exact build details:
+
+```text
+GPIO Client SDK Version: v1.1
+Build Date: 2025-10-10 14:17:03
+Platform: RK1106B/RV1103B
+Architecture: ARM (uclibcgnueabihf)
+```
+
+## Next steps
+
+Once the examples build successfully, follow the [integration guide](/sdk/integration) to link the SDK into your own C application and deploy it to the device.

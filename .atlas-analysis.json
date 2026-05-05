@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "AI Smart Glasses",
+  "projectType": "general",
+  "projectName": "AI Smart Glasses",
+  "projectDescription": "An open-source Linux-based smart glasses platform for medical, industrial, and consumer applications, built on the Rockchip RV1106B SoC with a C SDK for hardware access.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#94cb04",
-    "light": "#545454"
-  },
-  "favicon": "https://media.brand.dev/288cc7c4-5cef-4376-950b-bdf0083eedae.png",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses"
-    }
-  },
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
   "navigation": {
     "tabs": [
       {
@@ -91,5 +79,26 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "C/C++ SDK with GPIO, camera, audio, display, and text event APIs",
+    "Embedded Linux on Rockchip RV1106B (ARM Cortex-A7)",
+    "30° FOV 640×480 monocular display support (optional)",
+    "1080P camera with zero-copy shared memory image transfer",
+    "WiFi 802.11b/g/n, Bluetooth 5.3, USB 2.0 connectivity",
+    "IPC-based multi-client architecture via Unix Domain Sockets",
+    "Cross-compilation toolchain for ARM target (arm-rockchip831-linux-uclibcgnueabihf)",
+    "Pre-built AI Core service for out-of-box AI conversation workflows",
+    "3D-printable hardware frame design files (STEP/DXF)",
+    "Use cases: medical, industrial, educational, and consumer AR"
+  ],
+  "publicApiSurface": [
+    "ai_gpio_event_client_create() / connect() / subscribe() / unsubscribe() / destroy()",
+    "ai_core_init() / capture() / free_data() / cleanup()",
+    "ai_audio_init() / play() / stop() / record_start() / record_stop() / suspend_resources() / resume_resources() / cleanup()",
+    "ai_display_init() / connect() / get_framebuffer() / commit_frame() / request_focus() / cleanup()",
+    "ai_text_event_client_create() / start() / destroy()",
+    "log_info() / log_error() / log_debug() / log_warn()",
+    "libai_glass_sdk.a / libai_glass_sdk.so (static and shared libraries)"
+  ]
 }

@@ -1,0 +1,168 @@
+---
+title: "GPIO button event subscription example for AI Glasses"
+description: "Subscribe to button press and release events from GPIO pins on AI Smart Glasses using the async callback client API with under 13 ms latency."
+---
+
+The GPIO client lets any process receive button events from the AI Smart Glasses without accessing the hardware directly. A single `ai-core` process owns the GPIO pin and broadcasts press, release, and error events through shared memory and a Unix socket to up to 64 concurrent subscriber clients with a latency under 13 ms.
+
+## Prerequisites
+
+Start `ai-core` with GPIO enabled before running any client. Pass `--gpio-numbers` to expose additional pins beyond the default:
+
+```bash
+./ai-core --enable-gpio --gpio-number 1 --gpio-numbers 0,1,75
+```
+
+## Key types
+
+The `gpio_event_t` enum identifies the event delivered to your callback:
+
+| Value | Meaning |
+|---|---|
+| `GPIO_EVENT_PRESS` | Button pressed |
+| `GPIO_EVENT_RELEASE` | Button released |
+| `GPIO_EVENT_ERROR` | Hardware or service error |
+
+The `gpio_event_callback_t` signature is:
+
+```c
+typedef void (*gpio_event_callback_t)(gpio_event_t event_type, int gpio_number, void *user_data);
+```
+
+Your callback runs on a dedicated background thread, so keep it thread-safe and avoid blocking calls inside it.
+
+## Complete example
+
+The minimal example from the SDK README shows the full lifecycle:
+
+```c
+#include "ai_gpio.h"
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+
+static volatile int running = 1;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    running = 0;
+}
+
+static void my_callback(gpio_event_t event, int gpio, void *data) {
+    (void)data;
+    if (event == GPIO_EVENT_PRESS) {
+        printf("Button pressed GPIO%d\n", gpio);
+    }
+}
+
+int main(void) {
+    gpio_event_client_t client = {0};
+    signal(SIGINT, signal_handler);
+
+    ai_gpio_event_client_create(&client);
+    ai_gpio_event_client_connect(&client);
+    ai_gpio_event_client_subscribe(&client, my_callback, NULL);
+
+    while (running) {
+        sleep(1);
+    }
+
+    ai_gpio_event_client_unsubscribe(&client);
+    ai_gpio_event_client_destroy(&client);
+    return 0;
+}
+```
+
+To subscribe to a specific GPIO number other than the default (GPIO 1), replace `ai_gpio_event_client_connect` with the targeted variant:
+
+```c
+ai_gpio_event_client_connect_gpio(&client, 75);
+```
+
+## Handling all event types
+
+A production callback should handle press, release, and error events:
+
+```c
+void my_gpio_event_callback(gpio_event_t event_type, int gpio_number, void *user_data) {
+    switch (event_type) {
+        case GPIO_EVENT_PRESS:
+            printf("GPIO%d pressed\n", gpio_number);
+            break;
+        case GPIO_EVENT_RELEASE:
+            printf("GPIO%d released\n", gpio_number);
+            break;
+        case GPIO_EVENT_ERROR:
+            printf("GPIO%d error\n", gpio_number);
+            break;
+    }
+    fflush(stdout);
+}
+```
+
+## Service health check
+
+Call `ai_gpio_event_client_is_service_alive()` to verify `ai-core` is still running. It returns `1` when the service is up and `0` when it has stopped:
+
+```c
+if (!ai_gpio_event_client_is_service_alive(&client)) {
+    printf("Service stopped, exiting\n");
+    break;
+}
+```
+
+## Workflow
+
+<Steps>
+  <Step title="Write your client">
+    Include `ai_gpio.h`, zero-initialize a `gpio_event_client_t`, and implement your `gpio_event_callback_t` handler.
+  </Step>
+  <Step title="Compile">
+    Cross-compile against the prebuilt SDK library:
+
+    ```bash
+    arm-rockchip831-linux-uclibcgnueabihf-gcc \
+        -o my_gpio_app my_gpio_app.c \
+        -I/path/to/ai_glass_sdk/include \
+        -L/path/to/ai_glass_sdk/lib \
+        -lai_glass_sdk \
+        -lpthread -lrt
+    ```
+
+    Or build the included example directly:
+
+    ```bash
+    cd examples/gpio_example && make
+    ```
+  </Step>
+  <Step title="Run">
+    Make sure `ai-core` is running first, then launch your binary:
+
+    ```bash
+    # Start the service (in one terminal)
+    ./ai-core --enable-gpio --gpio-number 1 --gpio-numbers 0,1,75
+
+    # Run the example (in another terminal)
+    ./../build/gpio_example -g 75
+    ```
+
+    Press **Ctrl+C** to stop the client cleanly. The client calls `ai_gpio_event_client_unsubscribe` and `ai_gpio_event_client_destroy` before exiting.
+  </Step>
+</Steps>
+
+## API summary
+
+| Function | Description |
+|---|---|
+| `ai_gpio_event_client_create()` | Initialize the client struct |
+| `ai_gpio_event_client_connect()` | Connect to the default GPIO 1 service |
+| `ai_gpio_event_client_connect_gpio()` | Connect to a specific GPIO number |
+| `ai_gpio_event_client_subscribe()` | Register a callback and start the listener thread |
+| `ai_gpio_event_client_is_service_alive()` | Returns `1` if `ai-core` is running |
+| `ai_gpio_event_client_unsubscribe()` | Stop the listener thread |
+| `ai_gpio_event_client_disconnect()` | Close the socket connection |
+| `ai_gpio_event_client_destroy()` | Release all resources |
+
+<Note>
+  The service supports up to **64 concurrent clients** and delivers events with a latency under **13 ms**. Clients exit cleanly when the server stops.
+</Note>

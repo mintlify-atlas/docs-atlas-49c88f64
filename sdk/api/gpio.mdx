@@ -1,0 +1,440 @@
+---
+title: "GPIO Client API: button event subscription reference"
+description: "Subscribe to GPIO button press, release, and error events via shared memory IPC. Supports up to 64 concurrent clients with under 13 ms event delivery latency."
+---
+
+The GPIO Client API lets any process subscribe to button events from the AI Smart Glasses hardware without owning the GPIO pin directly. A single `ai-core` process monitors the hardware and broadcasts `GPIO_EVENT_PRESS`, `GPIO_EVENT_RELEASE`, and `GPIO_EVENT_ERROR` events through shared memory and a Unix socket to all registered clients. Callbacks fire on a dedicated background thread, so your main loop is never blocked.
+
+## Types
+
+### `gpio_event_t`
+
+Identifies the kind of event delivered to your callback.
+
+```c
+typedef enum {
+    GPIO_EVENT_PRESS    = 1,  /* Button pressed */
+    GPIO_EVENT_RELEASE  = 2,  /* Button released */
+    GPIO_EVENT_ERROR    = 3   /* GPIO error condition */
+} gpio_event_t;
+```
+
+### `gpio_event_callback_t`
+
+The callback function type you register with `ai_gpio_event_client_subscribe()`. It executes on a dedicated background thread — keep it short and thread-safe.
+
+```c
+typedef void (*gpio_event_callback_t)(
+    gpio_event_t event_type,
+    int          gpio_number,
+    void        *user_data
+);
+```
+
+### `gpio_event_client_t`
+
+Opaque client descriptor. Zero-initialize on the stack before passing it to any API function:
+
+```c
+gpio_event_client_t client = {0};
+```
+
+## Functions
+
+### `ai_gpio_event_client_create()`
+
+Initializes the client descriptor in preparation for connecting.
+
+**Signature:**
+
+```c
+int ai_gpio_event_client_create(gpio_event_client_t *client);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  Pointer to a zero-initialized `gpio_event_client_t` on the stack or heap.
+</ParamField>
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_gpio_event_client_connect()`
+
+Opens the shared memory segment and registers with the Unix socket broadcast server for the default GPIO (GPIO 1). The `ai-core` service must already be running.
+
+**Signature:**
+
+```c
+int ai_gpio_event_client_connect(gpio_event_client_t *client);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  An initialized client descriptor returned from `ai_gpio_event_client_create()`.
+</ParamField>
+
+**Returns:** `0` on success, `-1` on failure (service not running or shared memory unavailable).
+
+---
+
+### `ai_gpio_event_client_connect_gpio()`
+
+Connects to the broadcast service for a specific GPIO number. Use this instead of `ai_gpio_event_client_connect()` when you need to target GPIO 0, GPIO 75, or any pin other than GPIO 1.
+
+**Signature:**
+
+```c
+int ai_gpio_event_client_connect_gpio(gpio_event_client_t *client, int gpio_num);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  An initialized client descriptor.
+</ParamField>
+
+<ParamField path="gpio_num" type="int">
+  The GPIO pin number to monitor. The corresponding service instance must be running for this pin.
+</ParamField>
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_gpio_event_client_subscribe()`
+
+Starts a background listener thread that delivers events to your callback. This is the call that activates event reception.
+
+**Signature:**
+
+```c
+int ai_gpio_event_client_subscribe(
+    gpio_event_client_t  *client,
+    gpio_event_callback_t cb,
+    void                 *user_data
+);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  A connected client descriptor.
+</ParamField>
+
+<ParamField path="cb" type="gpio_event_callback_t">
+  Your event handler. Called from the listener thread with each new event.
+</ParamField>
+
+<ParamField path="user_data" type="void *">
+  An arbitrary pointer passed unchanged to every callback invocation. Pass `NULL` if unused.
+</ParamField>
+
+**Returns:** `0` on success, `-1` on failure.
+
+<Warning>
+  Your callback runs on a background thread. Do not call blocking functions or modify shared state without a lock inside the callback.
+</Warning>
+
+---
+
+### `ai_gpio_event_client_unsubscribe()`
+
+Stops the background listener thread and deregisters the callback. Blocks until the thread exits cleanly.
+
+**Signature:**
+
+```c
+void ai_gpio_event_client_unsubscribe(gpio_event_client_t *client);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  A subscribed client descriptor.
+</ParamField>
+
+---
+
+### `ai_gpio_event_client_disconnect()`
+
+Closes the Unix socket connection while keeping the shared memory mapping alive. You can call `ai_gpio_event_client_connect()` again after this to reconnect.
+
+**Signature:**
+
+```c
+void ai_gpio_event_client_disconnect(gpio_event_client_t *client);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  A connected client descriptor.
+</ParamField>
+
+---
+
+### `ai_gpio_event_client_destroy()`
+
+Releases all resources held by the client, including the shared memory mapping. Call `ai_gpio_event_client_unsubscribe()` first if still subscribed.
+
+**Signature:**
+
+```c
+void ai_gpio_event_client_destroy(gpio_event_client_t *client);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  The client descriptor to destroy. Do not use it after this call.
+</ParamField>
+
+---
+
+### `ai_gpio_event_client_is_service_alive()`
+
+Checks the shared memory magic field to determine whether the `ai-core` GPIO service is still running.
+
+**Signature:**
+
+```c
+int ai_gpio_event_client_is_service_alive(gpio_event_client_t *client);
+```
+
+<ParamField path="client" type="gpio_event_client_t *">
+  A connected client descriptor.
+</ParamField>
+
+**Returns:** `1` if the service is running, `0` if it has stopped or is unreachable.
+
+## Performance
+
+<CardGroup cols={2}>
+  <Card title="Event latency" icon="bolt">
+    Under 13 ms from hardware trigger to callback invocation.
+  </Card>
+  <Card title="Concurrent clients" icon="users">
+    Up to 64 clients can subscribe simultaneously to the same GPIO.
+  </Card>
+  <Card title="Event history" icon="clock">
+    A 32-event ring buffer allows late-connecting clients to catch up on recent events.
+  </Card>
+  <Card title="Shared memory" icon="memory">
+    4 KB per GPIO channel; zero heap allocation on the hot path.
+  </Card>
+</CardGroup>
+
+## Complete example
+
+The following program subscribes to GPIO 1 (the default), prints press and release events, and exits cleanly on `SIGINT`:
+
+```c
+#include "ai_gpio.h"
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+
+static volatile int g_running = 1;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    g_running = 0;
+}
+
+static void on_gpio_event(gpio_event_t event, int gpio_num, void *user_data) {
+    switch (event) {
+        case GPIO_EVENT_PRESS:
+            printf("GPIO%d pressed\n", gpio_num);
+            break;
+        case GPIO_EVENT_RELEASE:
+            printf("GPIO%d released\n", gpio_num);
+            break;
+        case GPIO_EVENT_ERROR:
+            printf("GPIO%d error\n", gpio_num);
+            break;
+    }
+}
+
+int main(void) {
+    gpio_event_client_t client = {0};
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    if (ai_gpio_event_client_create(&client) != 0) {
+        fprintf(stderr, "Failed to create client\n");
+        return 1;
+    }
+
+    if (ai_gpio_event_client_connect(&client) != 0) {
+        fprintf(stderr, "Failed to connect — is ai-core running?\n");
+        ai_gpio_event_client_destroy(&client);
+        return 1;
+    }
+
+    if (ai_gpio_event_client_subscribe(&client, on_gpio_event, NULL) != 0) {
+        fprintf(stderr, "Failed to subscribe\n");
+        ai_gpio_event_client_disconnect(&client);
+        ai_gpio_event_client_destroy(&client);
+        return 1;
+    }
+
+    printf("Listening for GPIO events. Press Ctrl+C to stop.\n");
+    while (g_running) {
+        sleep(1);
+    }
+
+    ai_gpio_event_client_unsubscribe(&client);
+    ai_gpio_event_client_disconnect(&client);
+    ai_gpio_event_client_destroy(&client);
+    return 0;
+}
+```
+
+## Compile command
+
+```bash
+arm-rockchip831-linux-uclibcgnueabihf-gcc \
+    -o my_gpio_app my_gpio_app.c \
+    -I/path/to/ai_glass_sdk/include \
+    -L/path/to/ai_glass_sdk/lib \
+    -lai_glass_sdk \
+    -lpthread -lrt
+```
+
+## Connecting to a specific GPIO
+
+Replace `ai_gpio_event_client_connect()` with the targeted variant to subscribe to a pin other than GPIO 1:
+
+```c
+/* Connect to GPIO 75 instead of the default GPIO 1 */
+ai_gpio_event_client_connect_gpio(&client, 75);
+```
+
+The corresponding `ai-core` instance must have been started with that pin number:
+
+```bash
+./ai-core --enable-gpio --gpio-numbers 0,1,75
+```
+
+## GPIO Hub API
+
+Starting from firmware v0.6.2, the platform uses a **GPIO Hub** architecture that centralizes event dispatch for multiple GPIO pins through a single shared memory region. If you need to monitor several buttons simultaneously, use the Hub API (`gpio_event_hub_client_t`) instead of creating one `gpio_event_client_t` per pin.
+
+### `gpio_event_hub_client_t`
+
+Hub client descriptor. Zero-initialize before use:
+
+```c
+gpio_event_hub_client_t hub_client = {0};
+```
+
+The hub shared memory is named `/ai_gpio_event_hub` and the socket is at `/tmp/ai_gpio_event_hub_broadcast`. Up to 16 GPIO pins are supported simultaneously.
+
+### `ai_gpio_hub_client_create()`
+
+Initializes the hub client descriptor.
+
+```c
+int ai_gpio_hub_client_create(gpio_event_hub_client_t *client);
+```
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_gpio_hub_client_connect()`
+
+Opens the hub shared memory connection.
+
+```c
+int ai_gpio_hub_client_connect(gpio_event_hub_client_t *client);
+```
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_gpio_hub_client_subscribe_gpios()`
+
+Subscribes to events from a specific list of GPIO pins.
+
+```c
+int ai_gpio_hub_client_subscribe_gpios(
+    gpio_event_hub_client_t *client,
+    const int               *gpio_list,
+    int                      gpio_count,
+    gpio_event_callback_t    callback,
+    void                    *user_data
+);
+```
+
+<ParamField path="gpio_list" type="const int *">
+  Array of GPIO pin numbers to subscribe to.
+</ParamField>
+
+<ParamField path="gpio_count" type="int">
+  Number of entries in `gpio_list`.
+</ParamField>
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_gpio_hub_client_subscribe_all()`
+
+Subscribes to events from all GPIO pins managed by the hub.
+
+```c
+int ai_gpio_hub_client_subscribe_all(
+    gpio_event_hub_client_t *client,
+    gpio_event_callback_t    callback,
+    void                    *user_data
+);
+```
+
+**Returns:** `0` on success, `-1` on failure.
+
+---
+
+### `ai_gpio_hub_client_get_gpio_state()`
+
+Reads the current logical state of a GPIO pin from shared memory.
+
+```c
+int ai_gpio_hub_client_get_gpio_state(
+    gpio_event_hub_client_t *client,
+    int                      gpio_number
+);
+```
+
+**Returns:** `1` if pressed, `0` if released, `-1` on error.
+
+---
+
+### `ai_gpio_hub_client_get_active_gpios()`
+
+Returns the list of GPIO pins currently monitored by the hub.
+
+```c
+int ai_gpio_hub_client_get_active_gpios(
+    gpio_event_hub_client_t *client,
+    int                     *gpio_list,
+    int                      max_count
+);
+```
+
+**Returns:** Number of active GPIO pins (may be less than `max_count`).
+
+---
+
+### `ai_gpio_hub_client_unsubscribe()`, `ai_gpio_hub_client_disconnect()`, `ai_gpio_hub_client_destroy()`
+
+```c
+void ai_gpio_hub_client_unsubscribe(gpio_event_hub_client_t *client);
+void ai_gpio_hub_client_disconnect(gpio_event_hub_client_t *client);
+void ai_gpio_hub_client_destroy(gpio_event_hub_client_t *client);
+```
+
+Call in order — unsubscribe first, then disconnect, then destroy — mirroring the lifecycle of the single-pin client.
+
+---
+
+### `ai_gpio_hub_client_is_service_alive()`
+
+Checks whether the hub service is running.
+
+```c
+int ai_gpio_hub_client_is_service_alive(gpio_event_hub_client_t *client);
+```
+
+**Returns:** `1` if the hub is running, `0` otherwise.

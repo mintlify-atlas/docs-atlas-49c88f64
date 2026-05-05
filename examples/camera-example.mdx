@@ -1,0 +1,185 @@
+---
+title: "Camera frame capture example for AI Smart Glasses SDK"
+description: "Capture JPEG or NV12 image frames from AI Smart Glasses using zero-copy shared memory transfer and the ai_camera client API with multi-client support."
+---
+
+The camera client retrieves image frames from `ai-core` through a shared memory region, avoiding any data copy between processes. A single shared memory buffer of 4 MB holds the captured frame alongside a small control area, which is large enough for a 1920×1080 JPEG or NV12 image. Resources are created when the first client connects and automatically released when the last client disconnects.
+
+## Prerequisites
+
+Start `ai-core` with the camera and JPEG output enabled before connecting any client:
+
+```bash
+./ai-core --enable-camera --enable-jpeg
+```
+
+For raw NV12 output, omit `--enable-jpeg`.
+
+## Image data structure
+
+`ai_core_capture()` fills an `ai_core_data_t` struct:
+
+```c
+typedef struct {
+    uint8_t *data;    // pointer into shared memory — do not free directly
+    size_t   size;    // bytes in the frame
+    int      width;   // pixel width
+    int      height;  // pixel height
+    int      format;  // AI_MEDIA_FORMAT_JPEG (0) or AI_MEDIA_FORMAT_NV12 (1)
+    int      sequence; // monotonically increasing frame counter
+} ai_core_data_t;
+```
+
+<Note>
+  The camera is mounted rotated 90° on the hardware. If your application needs portrait-correct orientation, add a rotation step when processing `data` before rendering or saving it.
+</Note>
+
+## Supported formats
+
+| Constant | Value | Description |
+|---|---|---|
+| `AI_MEDIA_FORMAT_JPEG` | `0` | Compressed JPEG — smaller payload, hardware encoded |
+| `AI_MEDIA_FORMAT_NV12` | `1` | Raw YUV420sp — full quality, larger payload |
+
+## Complete example
+
+The SDK example captures frames in a loop, saves each one to disk, and then releases the shared memory pointer:
+
+```c
+#include "ai_camera.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+
+static volatile int g_running = 1;
+
+static void signal_handler(int sig) {
+    g_running = 0;
+}
+
+int main(int argc, char *argv[]) {
+    ai_core_client_t *client = NULL;
+    ai_core_data_t data;
+    int result;
+    int capture_count = 0;
+    const char *save_path = (argc > 1) ? argv[1] : "/tmp";
+
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    // Step 1: initialize the camera client
+    client = ai_core_init();
+    if (!client) {
+        fprintf(stderr, "Failed to initialize media client\n");
+        return -1;
+    }
+
+    // Step 2: capture loop
+    while (g_running) {
+        // Capture with a 5-second timeout
+        result = ai_core_capture(client, &data, 5000);
+
+        if (result == AI_MEDIA_SUCCESS) {
+            printf("Captured frame #%d: %dx%d %s (%zu bytes)\n",
+                   data.sequence,
+                   data.width, data.height,
+                   (data.format == AI_MEDIA_FORMAT_JPEG) ? "JPEG" : "NV12",
+                   data.size);
+
+            // Step 3: process or save the frame
+            char filename[512];
+            const char *ext = (data.format == AI_MEDIA_FORMAT_JPEG) ? "jpg" : "nv12";
+            snprintf(filename, sizeof(filename),
+                     "%s/capture_%03d.%s", save_path, capture_count + 1, ext);
+
+            FILE *fp = fopen(filename, "wb");
+            if (fp) {
+                fwrite(data.data, 1, data.size, fp);
+                fclose(fp);
+            }
+
+            // Step 4: free the shared memory reference
+            ai_core_free_data(&data);
+            capture_count++;
+        } else {
+            fprintf(stderr, "Capture failed: %s\n",
+                    ai_core_get_error_string(result));
+            if (result == AI_MEDIA_ERROR_INIT) {
+                break; // service unavailable
+            }
+        }
+
+        usleep(500000); // 500 ms between captures
+    }
+
+    // Step 5: clean up
+    ai_core_cleanup(client);
+    printf("Total captures: %d\n", capture_count);
+    return 0;
+}
+```
+
+## Error codes
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `AI_MEDIA_SUCCESS` | `0` | Frame captured successfully |
+| `AI_MEDIA_ERROR_INIT` | `-1` | Client or service initialization failed |
+| `AI_MEDIA_ERROR_TIMEOUT` | `-2` | No frame arrived within the timeout |
+| `AI_MEDIA_ERROR_CAPTURE` | `-3` | Capture operation failed |
+| `AI_MEDIA_ERROR_MEMORY` | `-4` | Shared memory allocation failed |
+
+When `ai_core_capture()` returns `AI_MEDIA_ERROR_INIT`, it typically means `ai-core` is not running. All other errors are transient and safe to retry.
+
+## Workflow
+
+<Steps>
+  <Step title="Start ai-core">
+    ```bash
+    ./ai-core --enable-camera --enable-jpeg
+    ```
+  </Step>
+  <Step title="Write your client">
+    Call `ai_core_init()` to obtain a client handle. Check the return value — `NULL` means the service is unreachable.
+  </Step>
+  <Step title="Capture a frame">
+    Call `ai_core_capture(client, &data, timeout_ms)`. The `data.data` pointer points directly into the shared memory region — read or copy it before calling `ai_core_free_data()`.
+  </Step>
+  <Step title="Process the image">
+    Inspect `data.format`, `data.width`, and `data.height`. If you need portrait orientation, rotate the image before saving or displaying it.
+  </Step>
+  <Step title="Free the frame and clean up">
+    Call `ai_core_free_data(&data)` after each frame, then `ai_core_cleanup(client)` when the client is done.
+  </Step>
+  <Step title="Compile">
+    ```bash
+    arm-rockchip831-linux-uclibcgnueabihf-gcc \
+        -o my_camera_app my_camera_app.c \
+        -I/path/to/ai_glass_sdk/include \
+        -L/path/to/ai_glass_sdk/lib \
+        -lai_glass_sdk \
+        -lpthread -lrt
+    ```
+
+    Or build the bundled example:
+
+    ```bash
+    cd examples/camera_capture_example && make
+    # Run:
+    ./../build/camera_capture_example /tmp
+    ```
+  </Step>
+</Steps>
+
+## API summary
+
+| Function | Description |
+|---|---|
+| `ai_core_init()` | Connect to `ai-core` and map the shared memory region |
+| `ai_core_capture(client, data, timeout_ms)` | Wait for and return the next frame |
+| `ai_core_free_data(data)` | Release the shared memory reference for this frame |
+| `ai_core_cleanup(client)` | Disconnect and free the client handle |
+| `ai_core_get_error_string(code)` | Return a human-readable error message |

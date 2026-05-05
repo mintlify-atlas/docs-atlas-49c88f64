@@ -1,0 +1,78 @@
+---
+title: "Introduction to AI Smart Glasses Platform"
+description: "AI Smart Glasses is an open-source, Linux-based smart glasses platform built on Rockchip RV1106B for medical, industrial, and educational AR applications."
+---
+
+AI Smart Glasses is an open-source, Linux-based smart glasses platform designed for developers who want to build real-world AR applications on affordable, hackable hardware. The platform runs on a Rockchip RV1106B (ARM Cortex-A7) SoC and exposes camera, audio, GPIO, and display hardware through a C SDK — giving you full control from bare-metal peripherals up to application logic. Whether you're building a clinical assistant, an industrial inspection tool, or an educational AR guide, the platform provides a complete starting point under the Apache 2.0 license.
+
+## Platform overview
+
+The open-source scope covers the system software and application stack. You can develop on any RV1106B-based development board by adapting the peripherals to your own hardware design, or use the official AI glasses kit for a faster path with pre-wired peripherals and preloaded firmware.
+
+<CardGroup cols={2}>
+  <Card title="Single ARM Cortex-A7 core" icon="microchip">
+    Rockchip RV1106B SoC with 8GB eMMC storage. Compact and power-efficient for always-on wearable workloads.
+  </Card>
+  <Card title="1080P camera" icon="camera">
+    IMX219 sensor for high-resolution video capture. Mounted at 90° in the reference hardware — apply orientation preprocessing in your pipeline.
+  </Card>
+  <Card title="Monocular display (optional)" icon="display">
+    30° FOV, 640×480 resolution JBD display module. Available in the DisplayVersion firmware variant from v0.6.5.
+  </Card>
+  <Card title="Audio system" icon="volume-high">
+    Integrated microphone and speaker for voice input, TTS playback, and audio feedback.
+  </Card>
+  <Card title="WiFi + Bluetooth" icon="wifi">
+    802.11b/g/n (2.4GHz only) and Bluetooth 5.3 connectivity. The device advertises as "OSAIG" over Bluetooth.
+  </Card>
+  <Card title="Only 43g" icon="weight-scale">
+    Lightweight form factor with a 180mAh battery — approximately 2 hours of music playback, 3 hours with display, or 45 minutes of recording.
+  </Card>
+</CardGroup>
+
+## Hardware options
+
+The project supports two development paths:
+
+- **Your own RV1106B board** — Use any RV1106B-based development board and adapt the peripheral layer to your hardware design. This is the fully open-source path.
+- **Official AI glasses kit** — The integrated kit ships with pre-wired peripherals and factory firmware. Recommended for faster bring-up when you want to focus on application development rather than hardware integration.
+
+## The ai-core service
+
+The firmware ships with an optional bundled binary called `ai-core`, which runs as a system service and centrally manages camera, microphone, speaker, display, and GPIO. It is **not required** for open-source development.
+
+You can build your application entirely against the public SDK — camera, GPIO, audio, and IPC — without depending on `ai-core`. If your application's requirements match the built-in workflow, developing on top of `ai-core` is usually simpler and faster. If you prefer full control, you can disable it by removing or renaming `/etc/init.d/S53_guard` and rebooting.
+
+## Use cases
+
+<AccordionGroup>
+  <Accordion title="Medical applications" icon="stethoscope">
+    **Patient information display** — Doctors and nurses see patient name, bed number, diagnosis, allergy history, and key vitals in the corner of their field of view upon entering a ward, without consulting a computer.
+
+    **Real-time vital signs monitoring** — The glasses integrate data from bedside monitors. Abnormal heart rate, blood oxygen, or blood pressure triggers a highlighted warning in the field of view with an audio alert.
+
+    **Operation and procedure verification** — The camera scans drug barcodes and patient wristbands during infusion or medication administration to verify dosage and patient identity, preventing medical errors before they happen.
+
+    **Remote expert collaboration** — Junior doctors share live first-person video with remote specialists, who annotate the shared stream with AR markers and voice guidance — as if they were present on site.
+  </Accordion>
+  <Accordion title="Industrial applications" icon="industry">
+    **Substation operations** — The glasses read paper or electronic operation tickets, recognize on-site equipment through the camera, check commands against safety rules, and issue voice warnings if an operator approaches the wrong equipment.
+
+    **Remote maintenance guidance** — On-site technicians share first-person video with backend expert teams. Experts annotate the live stream with AR overlays — circles, arrows, and text — directly projected into the field worker's field of view.
+
+    **Multi-party consultation** — Multiple experts join a single video session for complex fault diagnosis. Sessions are recorded and archived to build maintenance case libraries for future training.
+  </Accordion>
+  <Accordion title="Educational applications" icon="graduation-cap">
+    **AR operation guidance** — Complex SOPs are broken into step-by-step AR instructions superimposed on real equipment. The current step is highlighted, and the system automatically advances when completion is detected visually.
+
+    **Tool and material recognition** — The camera recognizes whether the operator has picked up the correct tool for the current step, issuing warnings before equipment damage or assembly errors can occur.
+
+    **Voice navigation** — When both hands are occupied, operators control guidance playback with voice commands: "next," "previous," "repeat" — keeping full attention on the task.
+
+    **New employee training** — AR guidance reduces onboarding time and error rates by walking new employees through best practices step by step, encoding experienced workers' knowledge into repeatable processes.
+  </Accordion>
+</AccordionGroup>
+
+## License
+
+AI Smart Glasses is released under the [Apache License 2.0](https://github.com/Iam5tillLearning/OpenSource-Ai-Glasses/blob/main/LICENSE). You are free to use, modify, and distribute the platform — including for commercial applications — subject to the terms of that license.

@@ -1,0 +1,155 @@
+---
+title: "Cross-compile and deploy apps for AI Smart Glasses"
+description: "Cross-compile C/C++ applications for the ARM Cortex-A7 device using the Rockchip toolchain, then push and run them over ADB."
+---
+
+AI Smart Glasses run an embedded Linux system on an ARM Cortex-A7 core. Because you cannot compile directly on the device, you write and build code on your host machine using a cross-compilation toolchain, then transfer and run the binary on the glasses via ADB. This guide covers the full cycle: setting up the toolchain, building a Hello World program, and iterating from your editor.
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+- Cloned `AIGLASS_DEV_ENV` and run `./setup_build_env.sh` (see [environment setup](/guides/environment-setup))
+- ADB installed on your host machine
+- The device connected to your host via USB
+
+## Verify the environment
+
+From the `AIGLASS_DEV_ENV` workspace root, confirm both ADB and the cross-compiler are available:
+
+```bash
+# Verify ADB sees the device
+adb devices
+
+# Verify the C cross-compiler
+arm-rockchip831-linux-uclibcgnueabihf-gcc --version
+
+# Verify the C++ cross-compiler
+arm-rockchip831-linux-uclibcgnueabihf-g++ --version
+
+# Verify the linker
+arm-rockchip831-linux-uclibcgnueabihf-ld --version
+```
+
+The `adb devices` output should list your device. All compiler commands should print version strings without errors.
+
+## Hello World
+
+<Steps>
+  <Step title="Create the source file">
+    Inside the `AIGLASS_DEV_ENV` workspace, create a directory for your project and write a minimal C program:
+
+    ```bash
+    cd /path/to/AIGLASS_DEV_ENV
+    mkdir -p workspace/hello_world
+    cd workspace/hello_world
+    ```
+
+    ```c
+    // hello.c
+    #include <stdio.h>
+
+    int main(void) {
+        printf("Hello from AI Smart Glasses!\n");
+        return 0;
+    }
+    ```
+  </Step>
+
+  <Step title="Cross-compile the binary">
+    Compile `hello.c` for the ARM target:
+
+    ```bash
+    arm-rockchip831-linux-uclibcgnueabihf-gcc -O2 -o hello hello.c
+    ```
+
+    Confirm the output is an ARM ELF binary:
+
+    ```bash
+    file hello
+    ```
+
+    You should see output containing `ARM` and `ELF`.
+  </Step>
+
+  <Step title="Push the binary to the device">
+    Transfer the compiled binary to the device's `/userdata/apps/` directory:
+
+    ```bash
+    adb push hello /userdata/apps/hello
+    ```
+  </Step>
+
+  <Step title="Run on the device">
+    Set the executable bit and run the binary in a single ADB command:
+
+    ```bash
+    adb shell "chmod +x /userdata/apps/hello && /userdata/apps/hello"
+    ```
+
+    Expected output:
+
+    ```text
+    Hello from AI Smart Glasses!
+    ```
+  </Step>
+</Steps>
+
+## Build configurations
+
+Use these flags depending on your development stage:
+
+<CodeGroup>
+
+```bash Release build
+# Warnings enabled, optimized for production
+arm-rockchip831-linux-uclibcgnueabihf-gcc -Wall -Wextra -O2 -o myapp myapp.c
+```
+
+```bash Debug build
+# Debug symbols included, optimizations disabled
+arm-rockchip831-linux-uclibcgnueabihf-gcc -g -O0 -o myapp_dbg myapp.c
+```
+
+```bash Link common libraries
+# Link pthreads and math library
+arm-rockchip831-linux-uclibcgnueabihf-gcc -O2 -o myapp myapp.c -lpthread -lm
+```
+
+</CodeGroup>
+
+## Development workflow
+
+The recommended iteration loop is:
+
+1. Edit code on your host in any editor (VS Code, CLion, etc.)
+2. Cross-compile on your host
+3. Push the binary to the device with `adb push`
+4. Run it and inspect logs with `adb shell`
+5. Repeat
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cross-compiler not found">
+    The cross-compiler is installed by `setup_build_env.sh`. Re-run it from the `AIGLASS_DEV_ENV` root to restore the toolchain:
+
+    ```bash
+    ./setup_build_env.sh
+    ```
+
+    After it completes, open a new terminal session so `PATH` changes take effect.
+  </Accordion>
+
+  <Accordion title="ADB connection failed">
+    Restart the ADB server and re-check the device list:
+
+    ```bash
+    adb kill-server
+    adb start-server
+    adb devices
+    ```
+
+    If no device appears, check that the USB cable supports data transfer (not just charging) and that you have accepted the ADB authorization prompt on the device.
+  </Accordion>
+</AccordionGroup>

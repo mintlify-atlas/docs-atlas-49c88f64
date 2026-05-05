@@ -1,0 +1,96 @@
+---
+title: "AI Glass SDK overview: GPIO, camera, audio, display"
+description: "The AI Glass SDK gives C applications direct access to GPIO, camera, audio, display, and text events on the RV1106B smart glasses platform."
+---
+
+The AI Glass SDK is the official client development kit for AI Core Service — the system daemon running on the RV1106B smart glasses hardware. It abstracts Unix socket IPC, shared memory, and POSIX threading into a clean C API so your application can subscribe to button events, capture camera frames, play audio, render to the display, and receive streaming text from ASR and LLM pipelines without managing low-level resources directly.
+
+## Architecture
+
+Your application sits above the SDK, which communicates with the AI Media Service (`ai-core`) over local IPC. The service manages exclusive access to hardware resources and enforces arbitration between multiple clients.
+
+```
+External Application
+        ↓
+AI Glass SDK  (headers + libai_glass_sdk)
+        ↓
+AI Media Service  (ai-core)
+        ↓
+Hardware  (GPIO, Camera, Audio, Display)
+```
+
+<Note>
+  The `ai-core` service must be running before any SDK client can connect. If the service is not running, all connection calls will fail. Start it with the flags that match the hardware you need — for example, `./ai-core --enable-gpio --enable-camera`.
+</Note>
+
+## Functional modules
+
+The SDK ships six functional modules, each with its own header in `include/`.
+
+<CardGroup cols={2}>
+  <Card title="GPIO event subscription" icon="bolt">
+    Multi-process button monitoring with asynchronous callbacks. Supports up to 64 concurrent clients and delivers events with under 13 ms latency. Header: `ai_gpio.h`.
+  </Card>
+  <Card title="Camera access" icon="camera">
+    Zero-copy image transfer through shared memory. Supports JPEG and NV12 formats, concurrent multi-client access, and a 2 MB shared region sufficient for 1920×1080 frames. Header: `ai_camera.h`.
+  </Card>
+  <Card title="Audio control" icon="volume-high">
+    PCM playback and stop, recording start/stop/status, and unified resource arbitration to release and resume camera and audio ownership between applications. Header: `ai_audio.h`.
+  </Card>
+  <Card title="Display service" icon="display">
+    Shared-memory framebuffer transport to the monocular display. Provides dual slots (main display and overlay), frame commit, and multi-client focus management. Header: `ai_display.h`.
+  </Card>
+  <Card title="Text event subscription" icon="text">
+    Listens to ASR, LLM, and System text streams from `ai-core`. Supports streaming token output and final-result markers on a dedicated receive thread that does not block your main loop. Header: `ai_text_event.h`.
+  </Card>
+  <Card title="HTTP and WebSocket clients" icon="globe">
+    Bundled HTTP and WebSocket client implementations for outbound network communication, built on Mongoose. Headers: `http_client.h`, `ws_client.h`.
+  </Card>
+</CardGroup>
+
+## SDK contents
+
+The release package ships headers, prebuilt libraries, examples, and documentation. There is no `src/` directory in the release — all examples link against the prebuilt libraries in `lib/`.
+
+```text
+ai_glass_sdk/
+├── include/              # Public C headers
+│   ├── ai_gpio.h         # GPIO event client API
+│   ├── ai_ipc.h          # IPC communication API
+│   ├── ai_camera.h       # Camera client API
+│   ├── ai_audio.h        # Audio client API
+│   ├── ai_display.h      # Display client API
+│   ├── ai_text_event.h   # Text event client API
+│   ├── ai_log.h          # Log system API
+│   ├── http_client.h     # HTTP client API
+│   ├── ws_client.h       # WebSocket client API
+│   └── ai_ble.h          # BLE client API
+├── lib/
+│   ├── libai_glass_sdk.a # Static library
+│   └── libai_glass_sdk.so# Shared library
+├── examples/             # Example programs
+├── docs/                 # Per-module API documentation
+├── Makefile              # SDK build script
+└── VERSION               # Version and platform info
+```
+
+## Prerequisites
+
+Before using the SDK, make sure the following are in place:
+
+- **`ai-core` running** — the service daemon must be started with the hardware flags matching what your application needs.
+- **Cross-compilation toolchain** — `arm-rockchip831-linux-uclibcgnueabihf-gcc` targeting the RK1106B/RV1103B ARM platform.
+- **System libraries** — `pthread` and `rt` must be available on the target device.
+
+The SDK targets **platform RK1106B/RV1103B, architecture ARM (uclibcgnueabihf)**, as described in `VERSION`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install and build" icon="box" href="/sdk/installation">
+    Explore the SDK directory layout, build the example programs with `make`, and understand how the prebuilt libraries are structured.
+  </Card>
+  <Card title="Integrate into your project" icon="code" href="/sdk/integration">
+    Link the SDK into your own C application, choose between static and shared libraries, and deploy your binary to the device.
+  </Card>
+</CardGroup>

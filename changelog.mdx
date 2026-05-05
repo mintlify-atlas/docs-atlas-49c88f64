@@ -1,0 +1,113 @@
+---
+title: "AI Smart Glasses release history and version changelog"
+description: "Full version history for AI Smart Glasses firmware, from the initial v0.1.0 prototype through the current v0.6.5 stable release with dual firmware variants."
+icon: "clock-rotate-left"
+---
+
+AI Smart Glasses uses semantic versioning. Each release entry below describes what changed in the firmware, SDK, and hardware compatibility. The project is in active early development — expect frequent releases as features stabilize and the hardware design matures.
+
+<Note>
+  The v0.6.x firmware series requires **hardware produced after January 1, 2026**. If your official kit or RV1106B reference board was produced before that date, use v0.6.0 or earlier. See the [hardware overview](/hardware-overview) for details.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="v0.6.x — Current release series">
+
+    ### v0.6.5 — 2026-03-16
+
+    - Fixed multiple stability issues across the project, with emphasis on AI Core service reliability
+    - Enhanced edge-case and unexpected failure handling for improved robustness
+    - Introduced two firmware variants; choose the one that matches your hardware configuration:
+      - `Firmware_RV1106B_RK962_IMX219.AudioVersion.img` — for audio-only hardware
+      - `Firmware_RV1106B_RK962_IMX219.DisplayVersion.img` — for hardware with display
+
+    ---
+
+    ### v0.6.4 — 2026-02-10
+
+    - Added system-level `display-service` for display-enabled hardware variants
+    - Integrated `display-service` with the Application Development SDK, enabling third-party graphical rendering
+    - Added experimental `launcher-app` demo for graphical interaction workflows
+    - Both `display-service` and `launcher-app` are fully open-sourced for learning and customization
+
+    ---
+
+    ### v0.6.3
+
+    - Added Bluetooth support; device advertises as **OSAIG**
+    - **Known issue**: Xiaomi phones have compatibility problems with this Bluetooth implementation
+    - Display version users need to resolve display initialization issues manually in this release
+
+    ---
+
+    ### v0.6.2
+
+    - SDK: Added display module (UI and image rendering) and power save settings
+    - SDK: Added ASR and LLM text retrieval capability
+    - Optimized 30-second screen auto-off logic
+    - Upgraded internal architecture to GPIO Hub model
+    - Optimized 3D model structure
+    - Added cJSON library; removed legacy display application
+
+    ---
+
+    ### v0.6.1
+
+    - First release compatible exclusively with hardware produced after January 1, 2026
+
+    ---
+
+    ### v0.6.0
+
+    - New SDK released, establishing the baseline for the v0.6.x series
+
+  </Accordion>
+
+  <Accordion title="v0.5.x — WiFi provisioning">
+
+    ### v0.5.0
+
+    - Implemented complete WiFi provisioning logic
+    - Added detailed audio prompts to guide the user through the provisioning flow
+
+  </Accordion>
+
+  <Accordion title="v0.4.x — SDK introduction">
+
+    ### v0.4.0
+
+    - Encapsulated a developer SDK on top of the core server
+    - SDK exposes photo capture, GPIO control, and audio recording APIs for third-party applications
+
+  </Accordion>
+
+  <Accordion title="v0.3.x and earlier — Core server and prototypes">
+
+    ### v0.3.1
+
+    - Implemented system sentinel (watchdog / process guardian)
+
+    ---
+
+    ### v0.3.0
+
+    - Implemented core server responsible for photo capture, GPIO, audio recording, and AI conversation
+
+    ---
+
+    ### v0.2.x — 3D model iterations
+
+    - **v0.2.3**: Optimized cable slot layout
+    - **v0.2.2**: Modified glasses front frame model; reserved space for optical engine and waveguide
+    - **v0.2.1**: Updated temple model; finalized sound cavity and antenna cavity geometry
+    - **v0.2.0**: First version of frame 3D printing mold
+
+    ---
+
+    ### v0.1.x — Initial prototype
+
+    - **v0.1.1**: Significantly optimized AI conversation latency; first-packet end-to-end latency reduced to approximately 1 second
+    - **v0.1.0**: Implemented basic AI conversation capability
+
+  </Accordion>
+</AccordionGroup>
